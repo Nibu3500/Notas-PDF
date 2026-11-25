@@ -52,7 +52,10 @@ input[type=file]{display:none}
 #cameraModal h2{margin:0;font-size:18px}
 #cameraModal .camhead button{padding:7px 12px}
 #camView{flex:1;min-height:140px;position:relative;display:flex;align-items:center;justify-content:center;background:#000;border-radius:10px;overflow:hidden}
-#camVideo{width:100%;height:100%;position:absolute;inset:0;object-fit:contain}
+#camVideo{width:100%;height:100%;position:absolute;inset:0;object-fit:contain;cursor:crosshair;touch-action:manipulation}
+#camFocusMark{position:absolute;width:58px;height:58px;border:2px solid #facc15;border-radius:9px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;box-shadow:0 0 0 1px #1118}
+#camFocusMark[hidden]{display:none}
+#camRefocus{padding:7px 10px;flex-shrink:0;font-size:14px}
 #camFlash{position:absolute;inset:0;pointer-events:none;background:#fff;opacity:0;transition:opacity .15s}
 #camFlash.on{opacity:.65;transition:none}
 #camStatus{font-size:14px;margin:0;color:#dbe5ef;min-height:1.4em}
@@ -132,8 +135,9 @@ body.review-open{overflow:hidden}#toast{z-index:40}
 <div id="toast" role="status"></div>
 <div id="cameraModal" role="dialog" aria-modal="true" aria-labelledby="camTitle" hidden>
   <div class="camhead"><h2 id="camTitle">Câmera</h2><button type="button" id="camCancel">Cancelar</button></div>
-  <div id="camView"><video id="camVideo" autoplay playsinline muted></video><div id="camFlash"></div></div>
+  <div id="camView"><video id="camVideo" autoplay playsinline muted></video><div id="camFlash"></div><div id="camFocusMark" hidden aria-hidden="true"></div></div>
   <p id="camStatus" role="status" aria-live="polite">Abrindo a câmera…</p>
+  <button type="button" id="camRefocus" disabled>Refocar no centro da nota</button>
   <div id="camStrip" aria-label="Fotos capturadas"></div>
   <div id="camActions"><button type="button" id="camCapture" class="pri" disabled>Capturar foto</button><button type="button" id="camDone" disabled>Finalizar (0)</button></div>
   <button type="button" id="camNative" hidden>Câmera nativa do celular (alternativa, uma foto por vez)</button>
@@ -371,10 +375,62 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#reviewModal').
 /* ---------- Câmera contínua (capturas antes de iniciar o OCR) ---------- */
 let camStream=null,camShots=[],camSession=0,camBusy=false,camReady=false,camSeq=0;
 const camVideo=$('#camVideo'),camModal=$('#cameraModal');
+let camFocusPoint={x:.5,y:.5},camFocusing=false,camFocusTimer;
+const waitFocus=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function cameraArea(){
+  const b=camVideo.getBoundingClientRect(),w=camVideo.videoWidth,h=camVideo.videoHeight;
+  if(!w||!h)return null;
+  const scale=Math.min(b.width/w,b.height/h),vw=w*scale,vh=h*scale;
+  if(!vw||!vh)return null;
+  return {left:b.left+(b.width-vw)/2,top:b.top+(b.height-vh)/2,w:vw,h:vh};
+}
+function showFocusPoint(p){
+  const area=cameraArea();if(!area)return;
+  const view=$('#camView').getBoundingClientRect(),mark=$('#camFocusMark');
+  mark.style.left=(area.left-view.left+p.x*area.w)+'px';
+  mark.style.top=(area.top-view.top+p.y*area.h)+'px';
+  mark.hidden=false;clearTimeout(camFocusTimer);
+  camFocusTimer=setTimeout(()=>{mark.hidden=true},1200);
+}
+async function requestFocus(p){
+  const track=camStream?.getVideoTracks()[0];if(!track)return false;
+  const caps=track.getCapabilities?.()||{},supported=navigator.mediaDevices.getSupportedConstraints?.()||{};
+  const mode=caps.focusMode?.includes('single-shot')?'single-shot':caps.focusMode?.includes('continuous')?'continuous':null;
+  const base=track.getConstraints?.()||{};
+  delete base.advanced;
+  const request={};
+  if(mode)request.focusMode=mode;
+  if(supported.pointsOfInterest)request.pointsOfInterest=[p];
+  if(!Object.keys(request).length)return false;
+  try{await track.applyConstraints({...base,advanced:[request]});return true}
+  catch(_){
+    if(mode)try{await track.applyConstraints({...base,advanced:[{focusMode:mode}]});return true}catch(_){}
+    return false;
+  }
+}
+async function focusOn(p){
+  if(!camReady||camBusy||camFocusing)return;
+  const session=camSession;camFocusPoint=p;camFocusing=true;atualizarCamera();showFocusPoint(p);
+  $('#camStatus').textContent='Solicitando foco… mantenha a nota parada.';
+  try{
+    const requested=await requestFocus(p);
+    if(requested)await waitFocus(650);
+    if(session===camSession&&camReady)$('#camStatus').textContent=requested?'Confira se o texto ficou nítido antes de capturar.':'Foco por toque não disponível. Afaste um pouco o celular ou use a câmera nativa.';
+  }catch(_){if(session===camSession&&camReady)$('#camStatus').textContent='Não foi possível solicitar foco. Afaste um pouco o celular.'}
+  finally{if(session===camSession){camFocusing=false;atualizarCamera()}}
+}
+camVideo.addEventListener('click',e=>{
+  const a=cameraArea();if(!a)return;
+  const x=(e.clientX-a.left)/a.w,y=(e.clientY-a.top)/a.h;
+  if(x<0||x>1||y<0||y>1)return;
+  focusOn({x,y});
+});
+$('#camRefocus').onclick=()=>focusOn({x:.5,y:.5});
 function atualizarCamera(){
   $('#camDone').textContent='Finalizar ('+camShots.length+')';
-  $('#camDone').disabled=camBusy||!camShots.length;
-  $('#camCapture').disabled=camBusy||!camReady;
+  $('#camDone').disabled=camBusy||camFocusing||!camShots.length;
+  $('#camCapture').disabled=camBusy||camFocusing||!camReady;
+  $('#camRefocus').disabled=camBusy||camFocusing||!camReady;
   const strip=$('#camStrip');strip.replaceChildren();
   camShots.forEach((shot,i)=>{
     const d=document.createElement('div');d.className='camShot';
@@ -385,7 +441,7 @@ function atualizarCamera(){
   });
 }
 function pararCamera(){
-  camReady=false;
+  camReady=false;camFocusing=false;clearTimeout(camFocusTimer);$('#camFocusMark').hidden=true;
   if(camStream)camStream.getTracks().forEach(t=>t.stop());
   camStream=null;camVideo.srcObject=null;
 }
@@ -404,7 +460,7 @@ function erroCamera(e){
 }
 async function abrirCamera(){
   if(!camModal.hidden)return;
-  const session=++camSession;camShots=[];camBusy=false;camReady=false;
+  const session=++camSession;camShots=[];camBusy=false;camReady=false;camFocusing=false;camFocusPoint={x:.5,y:.5};
   camModal.hidden=false;document.body.classList.add('camera-open');$('#camNative').hidden=true;
   $('#camStatus').textContent='Abrindo a câmera…';atualizarCamera();$('#camCancel').focus();
   try{
@@ -415,20 +471,22 @@ async function abrirCamera(){
     const track=stream.getVideoTracks()[0];
     try{
       const caps=track.getCapabilities?.()||{};
-      if(caps.focusMode?.includes('continuous'))await track.applyConstraints({advanced:[{focusMode:'continuous'}]});
+      if(caps.focusMode?.includes('continuous'))await track.applyConstraints({...track.getConstraints(),advanced:[{focusMode:'continuous'}]});
     }catch(_){}
     if(session!==camSession)return;
     camVideo.srcObject=stream;await camVideo.play();
     if(session!==camSession)return;
-    camReady=true;atualizarCamera();$('#camNative').hidden=false;$('#camStatus').textContent='Enquadre a nota, aguarde o foco e capture. Vídeo: '+camVideo.videoWidth+' × '+camVideo.videoHeight+' px.';
+    camReady=true;atualizarCamera();$('#camNative').hidden=false;$('#camStatus').textContent='Enquadre a nota, toque no texto para focar e confira a nitidez. Vídeo: '+camVideo.videoWidth+' × '+camVideo.videoHeight+' px.';
     stream.getVideoTracks().forEach(t=>t.addEventListener('ended',()=>{if(session===camSession)erroCamera()}));
   }catch(e){if(session===camSession)erroCamera(e)}
 }
 async function capturarCamera(){
-  if(camBusy||!camReady||!camVideo.videoWidth||!camVideo.videoHeight)return;
+  if(camBusy||camFocusing||!camReady||!camVideo.videoWidth||!camVideo.videoHeight)return;
   const session=camSession;camBusy=true;atualizarCamera();
-  const flash=$('#camFlash');flash.classList.add('on');setTimeout(()=>flash.classList.remove('on'),100);
   try{
+    $('#camStatus').textContent='Ajustando foco antes da foto… mantenha o celular parado.';
+    try{if(await requestFocus(camFocusPoint))await waitFocus(650)}catch(_){}
+    if(session!==camSession||!camReady)return;
     let blob;
     // Usa a foto em resolução nativa quando o navegador oferecer ImageCapture.
     let modo='vídeo';
@@ -453,6 +511,7 @@ async function capturarCamera(){
     }
     if(session!==camSession)return;
     if(!blob||!blob.size)throw new Error('captura');
+    const flash=$('#camFlash');flash.classList.add('on');setTimeout(()=>flash.classList.remove('on'),100);
     const ext=blob.type==='image/png'?'png':blob.type==='image/webp'?'webp':'jpg';
     const file=new File([blob],'foto-'+Date.now()+'-'+(++camSeq)+'.'+ext,{type:blob.type||'image/jpeg'});
     const url=URL.createObjectURL(file);
@@ -469,7 +528,7 @@ async function capturarCamera(){
 }
 $('#camOpen').onclick=abrirCamera;
 $('#camCapture').onclick=capturarCamera;
-$('#camDone').onclick=()=>{if(camBusy||!camShots.length)return;const fs=camShots.map(s=>s.file);fecharCamera();enfileirarFotos(fs)};
+$('#camDone').onclick=()=>{if(camBusy||camFocusing||!camShots.length)return;const fs=camShots.map(s=>s.file);fecharCamera();enfileirarFotos(fs)};
 $('#camCancel').onclick=()=>{if(!camShots.length||confirm('Descartar as '+camShots.length+' foto(s) desta sessão?'))fecharCamera()};
 $('#camNative').onclick=()=>{if(camShots.length)return $('#camStatus').textContent='Finalize as fotos capturadas antes de usar a outra câmera.';fecharCamera();$('#cam').click()};
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!camModal.hidden)$('#camCancel').click()});
