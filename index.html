@@ -56,6 +56,8 @@ input[type=file]{display:none}
 #camFocusMark{position:absolute;width:58px;height:58px;border:2px solid #facc15;border-radius:9px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;box-shadow:0 0 0 1px #1118}
 #camFocusMark[hidden]{display:none}
 #camRefocus{padding:7px 10px;flex-shrink:0;font-size:14px}
+#camLensRow{display:flex;align-items:center;gap:8px;flex-shrink:0;font-size:14px}
+#camLens{min-width:0;flex:1;color:#fff;background:#26333e;border:1px solid #64748b;border-radius:8px;padding:8px;font:inherit}
 #camFlash{position:absolute;inset:0;pointer-events:none;background:#fff;opacity:0;transition:opacity .15s}
 #camFlash.on{opacity:.65;transition:none}
 #camStatus{font-size:14px;margin:0;color:#dbe5ef;min-height:1.4em}
@@ -137,6 +139,7 @@ body.review-open{overflow:hidden}#toast{z-index:40}
   <div class="camhead"><h2 id="camTitle">Câmera</h2><button type="button" id="camCancel">Cancelar</button></div>
   <div id="camView"><video id="camVideo" autoplay playsinline muted></video><div id="camFlash"></div><div id="camFocusMark" hidden aria-hidden="true"></div></div>
   <p id="camStatus" role="status" aria-live="polite">Abrindo a câmera…</p>
+  <label id="camLensRow" for="camLens">Lente <select id="camLens" disabled><option value="">Câmera automática</option></select></label>
   <button type="button" id="camRefocus" disabled>Refocar no centro da nota</button>
   <div id="camStrip" aria-label="Fotos capturadas"></div>
   <div id="camActions"><button type="button" id="camCapture" class="pri" disabled>Capturar foto</button><button type="button" id="camDone" disabled>Finalizar (0)</button></div>
@@ -431,6 +434,7 @@ function atualizarCamera(){
   $('#camDone').disabled=camBusy||camFocusing||!camShots.length;
   $('#camCapture').disabled=camBusy||camFocusing||!camReady;
   $('#camRefocus').disabled=camBusy||camFocusing||!camReady;
+  $('#camLens').disabled=camBusy||camFocusing||$('#camLens').options.length<2;
   const strip=$('#camStrip');strip.replaceChildren();
   camShots.forEach((shot,i)=>{
     const d=document.createElement('div');d.className='camShot';
@@ -458,28 +462,91 @@ function erroCamera(e){
     :e?.name==='NotAllowedError'?'Permissão da câmera negada. Libere nas configurações do navegador ou use a alternativa abaixo.'
     :'Não foi possível abrir a câmera contínua. Use a alternativa abaixo.';
 }
+let camDevices=[];
+const camLens=$('#camLens');
+function savedLens(){try{return localStorage.getItem('notas-camera-lens')||''}catch(_){return ''}}
+function saveLens(id){try{if(id)localStorage.setItem('notas-camera-lens',id);else localStorage.removeItem('notas-camera-lens')}catch(_){}}
+function isOtherLens(label){return /ultra|0[.,][56]x|telephoto|teleobjetiva|macro|depth|profundidade|front|frontal|user|selfie/i.test(label)}
+function preferredMain(devices){
+  return devices.find(d=>!isOtherLens(d.label)&&/main|principal|primary|normal|(?:^|\W)1[.,]?0?\s*x(?:\W|$)|standard/i.test(d.label)&&!/front|frontal|selfie/i.test(d.label))
+    ||devices.find(d=>!isOtherLens(d.label)&&/back|rear|traseira|environment/i.test(d.label)&&/wide|angular/i.test(d.label));
+}
+async function listLenses(session){
+  try{
+    const ds=await navigator.mediaDevices.enumerateDevices();
+    if(session!==camSession)return [];
+    camDevices=ds.filter(d=>d.kind==='videoinput'&&d.deviceId);
+  }catch(_){if(session===camSession)camDevices=[]}
+  if(session!==camSession)return [];
+  const current=camStream?.getVideoTracks()[0]?.getSettings().deviceId||'';
+  camLens.replaceChildren(new Option('Câmera automática',''));
+  camDevices.forEach((d,i)=>camLens.add(new Option(d.label||'Câmera '+(i+1),d.deviceId)));
+  camLens.value=camDevices.some(d=>d.deviceId===current)?current:'';
+  atualizarCamera();return camDevices;
+}
+async function startLens(session,id){
+  pararCamera();
+  const video={width:{ideal:4096},height:{ideal:3072},aspectRatio:{ideal:4/3}};
+  if(id)video.deviceId={exact:id};else video.facingMode={ideal:'environment'};
+  const stream=await navigator.mediaDevices.getUserMedia({audio:false,video});
+  if(session!==camSession){stream.getTracks().forEach(t=>t.stop());return false}
+  camStream=stream;
+  const track=stream.getVideoTracks()[0];
+  try{
+    const caps=track.getCapabilities?.()||{};
+    if(caps.focusMode?.includes('continuous'))await track.applyConstraints({...track.getConstraints(),advanced:[{focusMode:'continuous'}]});
+  }catch(_){}
+  if(session!==camSession||camStream!==stream)return false;
+  camVideo.srcObject=stream;await camVideo.play();
+  if(session!==camSession||camStream!==stream)return false;
+  camReady=true;camFocusPoint={x:.5,y:.5};
+  track.addEventListener('ended',()=>{if(session===camSession&&camStream===stream)erroCamera()});
+  return true;
+}
+function showLensStatus(){
+  const track=camStream?.getVideoTracks()[0];
+  $('#camNative').hidden=false;
+  $('#camStatus').textContent=(track?.label||'Câmera ativa')+' · '+camVideo.videoWidth+' × '+camVideo.videoHeight+' px. Escolha a lente principal (1x) ou teste as opções.';
+}
 async function abrirCamera(){
   if(!camModal.hidden)return;
-  const session=++camSession;camShots=[];camBusy=false;camReady=false;camFocusing=false;camFocusPoint={x:.5,y:.5};
+  const session=++camSession;camShots=[];camBusy=true;camReady=false;camFocusing=false;camFocusPoint={x:.5,y:.5};
+  camDevices=[];camLens.replaceChildren(new Option('Câmera automática',''));
   camModal.hidden=false;document.body.classList.add('camera-open');$('#camNative').hidden=true;
   $('#camStatus').textContent='Abrindo a câmera…';atualizarCamera();$('#camCancel').focus();
   try{
     if(!navigator.mediaDevices?.getUserMedia)throw new Error('camera indisponível');
-    const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:4096},height:{ideal:3072},aspectRatio:{ideal:4/3}}});
-    if(session!==camSession){stream.getTracks().forEach(t=>t.stop());return}
-    camStream=stream;
-    const track=stream.getVideoTracks()[0];
-    try{
-      const caps=track.getCapabilities?.()||{};
-      if(caps.focusMode?.includes('continuous'))await track.applyConstraints({...track.getConstraints(),advanced:[{focusMode:'continuous'}]});
-    }catch(_){}
-    if(session!==camSession)return;
-    camVideo.srcObject=stream;await camVideo.play();
-    if(session!==camSession)return;
-    camReady=true;atualizarCamera();$('#camNative').hidden=false;$('#camStatus').textContent='Enquadre a nota, toque no texto para focar e confira a nitidez. Vídeo: '+camVideo.videoWidth+' × '+camVideo.videoHeight+' px.';
-    stream.getVideoTracks().forEach(t=>t.addEventListener('ended',()=>{if(session===camSession)erroCamera()}));
+    const remembered=savedLens();
+    try{if(!await startLens(session,remembered))return}
+    catch(e){if(session!==camSession)return;if(!remembered)throw e;saveLens('');if(!await startLens(session,''))return}
+    await listLenses(session);if(session!==camSession)return;
+    const main=preferredMain(camDevices),current=camStream?.getVideoTracks()[0]?.getSettings().deviceId;
+    if(!savedLens()&&main&&main.deviceId!==current){
+      try{if(!await startLens(session,main.deviceId))return}
+      catch(_){if(session!==camSession)return;if(!await startLens(session,current||''))return}
+      await listLenses(session);
+    }
+    if(session===camSession)showLensStatus();
   }catch(e){if(session===camSession)erroCamera(e)}
+  finally{if(session===camSession){camBusy=false;atualizarCamera()}}
 }
+camLens.onchange=async()=>{
+  if(camBusy||camFocusing)return;
+  const id=camLens.value,previous=camStream?.getVideoTracks()[0]?.getSettings().deviceId||'',session=camSession;
+  camBusy=true;atualizarCamera();$('#camStatus').textContent='Trocando a lente…';
+  try{
+    if(!await startLens(session,id))return;
+    saveLens(id);await listLenses(session);
+    if(session===camSession)showLensStatus();
+  }catch(e){
+    if(session!==camSession)return;
+    try{
+      if(!await startLens(session,previous))return;
+      await listLenses(session);
+      if(session===camSession)$('#camStatus').textContent='Não foi possível trocar a lente. A câmera anterior foi restaurada.';
+    }catch(err){if(session===camSession)erroCamera(err)}
+  }finally{if(session===camSession){camBusy=false;atualizarCamera()}}
+};
 async function capturarCamera(){
   if(camBusy||camFocusing||!camReady||!camVideo.videoWidth||!camVideo.videoHeight)return;
   const session=camSession;camBusy=true;atualizarCamera();
