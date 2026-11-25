@@ -109,7 +109,7 @@ body.review-open{overflow:hidden}#toast{z-index:40}
   <input type="text" id="num" autocomplete="off" inputmode="numeric" placeholder="Deixe vazio para leitura automática">
   <div id="ocr" class="vz" aria-live="polite"></div>
   <div class="row">
-    <button type="button" class="pri" id="camOpen">Tirar foto</button>
+    <label class="btn pri" id="camOpen" for="cam">Tirar foto</label>
     <label class="btn" for="gal">Da galeria</label>
   </div>
   <input type="file" id="cam" accept="image/*" capture="environment">
@@ -602,7 +602,7 @@ async function capturarCamera(){
   }catch(_){if(session===camSession)$('#camStatus').textContent='Não consegui capturar. Tente novamente.'}
   finally{if(session===camSession){camBusy=false;atualizarCamera();$('#camStrip').scrollLeft=$('#camStrip').scrollWidth}}
 }
-$('#camOpen').onclick=()=>$('#cam').click();
+
 $('#camCapture').onclick=capturarCamera;
 $('#camDone').onclick=()=>{if(camBusy||camFocusing||!camShots.length)return;const fs=camShots.map(s=>s.file);fecharCamera();enfileirarFotos(fs)};
 $('#camCancel').onclick=()=>{if(!camShots.length||confirm('Descartar as '+camShots.length+' foto(s) desta sessão?'))fecharCamera()};
