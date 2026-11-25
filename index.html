@@ -638,6 +638,7 @@ $('#lim').onclick=async()=>{
 
 /* ---------- Lista ---------- */
 const EXPORT_LIMIT=9,EXPORT_KEY='notas-pdf-lote-compartilhado';
+const EXPORT_VERSION='Lotes de 9 · v2';
 let exportBusy=false,exportNotes=[],awaitingExport=[];
 try{const saved=JSON.parse(localStorage.getItem(EXPORT_KEY)||'[]');if(Array.isArray(saved))awaitingExport=saved}catch(_){}
 function rememberExport(notes){awaitingExport=notes.map(n=>({id:n.id,date:n.date,name:nome(n)}));try{localStorage.setItem(EXPORT_KEY,JSON.stringify(awaitingExport))}catch(_){}}
@@ -646,9 +647,9 @@ function exportBatch(){return exportNotes.filter(n=>!n.ok).sort((a,b)=>a.date-b.
 function pendingConfirmation(){return exportNotes.filter(n=>!n.ok&&awaitingNote(n))}
 function exportUI(){
   const pend=exportNotes.filter(n=>!n.ok).length,done=exportNotes.length-pend,confirming=pendingConfirmation().length;
-  $('#expInfo').textContent=exportNotes.length+' nota(s) · '+done+' exportada(s) · '+pend+' pendente(s)';
+  $('#expInfo').textContent=done+' exportada(s) · '+pend+' pendente(s) | '+EXPORT_VERSION;
   $('#expRetry').hidden=!confirming;$('#expRetry').disabled=exportBusy;
-  if(!exportBusy){$('#exp').textContent=confirming?'Confirmar '+confirming+' salva(s) no Drive':pend?'Exportar próximas '+Math.min(EXPORT_LIMIT,pend)+' notas':'Tudo exportado';$('#exp').disabled=!pend}
+  if(!exportBusy){$('#exp').textContent=confirming?'Confirmar '+confirming+' salva(s) no Drive':pend?'Exportar '+Math.min(EXPORT_LIMIT,pend)+' de '+pend+' pendentes':'Tudo exportado';$('#exp').disabled=!pend}
   else $('#exp').disabled=true;
   $('#lim').disabled=exportBusy||!done;$('#lim').textContent=done?'Apagar '+done+' exportadas':'Apagar exportadas';
 }
@@ -725,16 +726,18 @@ $('#exp').onclick=async()=>{
     finally{exportBusy=false;await render()}
     return;
   }
-  const pend=exportBatch();if(!pend.length)return;
+  const pend=exportBatch().slice(0,EXPORT_LIMIT);if(!pend.length)return;
+  if(pend.length>9)return toast('Limite de 9 PDFs por envio.');
   const duv=pend.filter(n=>n.conf&&n.conf!=='alta').length;
   if(duv&&!confirm(duv+' nota(s) neste lote estão marcadas "conferir" (leitura incerta). Exportar mesmo assim?'))return;
   exportBusy=true;exportUI();const btn=$('#exp');btn.textContent='Preparando '+pend.length+' PDFs…';
   let sent=0;
   try{
     if(!CID()){
-      const files=pend.map(n=>new File([n.blob],nome(n),{type:'application/pdf'}));
+      const files=pend.slice(0,EXPORT_LIMIT).map(n=>new File([n.blob],nome(n),{type:'application/pdf'}));
+      if(files.length>9)throw new Error('Limite de 9 PDFs por envio');
       if(navigator.share&&navigator.canShare&&navigator.canShare({files})){
-        await navigator.share({files,title:'Notas'});
+        await navigator.share({files,title:'Notas — lote de '+files.length+' PDFs'});
         rememberExport(pend);
         toast('Confira o salvamento no Drive e depois confirme o lote aqui.');
       }else{
