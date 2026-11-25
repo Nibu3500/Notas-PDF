@@ -8,7 +8,7 @@
 <style>
 :root{--bg:#E8EAEC;--ink:#14202B;--mut:#5B6773;--line:#C9CED3;--ac:#0B57D0;--ok:#1E7B4F;--pe:#9A5B00;--rd:#B3261E}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:0 14px 96px}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:0 14px 156px}
 header{display:flex;justify-content:space-between;align-items:center;padding:16px 0 10px}
 h1{font-size:22px;margin:0}
 h2{font-size:16px;margin:22px 0 8px}
@@ -42,7 +42,8 @@ button:disabled{opacity:.5;cursor:default}
 #ocr button{padding:2px 8px;font-size:13px}
 #bar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom,0px));background:var(--ink)}
 #bar button{width:100%;background:#fff}
-#toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90%;text-align:center}
+#bar{z-index:10}#expInfo{color:#fff;text-align:center;font-size:13px;margin-bottom:6px}#expRetry{margin-top:6px;font-size:13px;padding:6px}#expRetry[hidden]{display:none}
+#toast{position:fixed;left:50%;bottom:148px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90%;text-align:center}
 #toast.on{opacity:1}
 input[type=file]{display:none}
 /* Câmera contínua */
@@ -134,7 +135,7 @@ body.review-open{overflow:hidden}#toast{z-index:40}
 <div id="lista"></div>
 <div id="esp"></div>
 
-<div id="bar"><button id="exp">Exportar tudo para o Drive</button></div>
+<div id="bar"><div id="expInfo" aria-live="polite">Carregando notas…</div><button id="exp" disabled>Exportar próximas notas</button><button id="expRetry" hidden>Não salvei — liberar nova tentativa</button></div>
 <div id="toast" role="status"></div>
 <div id="cameraModal" role="dialog" aria-modal="true" aria-labelledby="camTitle" hidden>
   <div class="camhead"><h2 id="camTitle">Câmera</h2><button type="button" id="camCancel">Cancelar</button></div>
@@ -627,6 +628,7 @@ async function espaco(l){
     (q?'<i><b style="width:'+Math.min(100,u/q*100).toFixed(1)+'%"></b></i>':'');
 }
 $('#lim').onclick=async()=>{
+  if(exportBusy)return;
   const l=(await all()).filter(n=>n.ok);
   if(!l.length)return toast('Nenhuma nota exportada para apagar');
   if(!confirm('Apagar '+l.length+' nota(s) já exportada(s) deste aparelho? Confira se estão no Drive antes de continuar.'))return;
@@ -635,18 +637,33 @@ $('#lim').onclick=async()=>{
 };
 
 /* ---------- Lista ---------- */
+const EXPORT_LIMIT=9,EXPORT_KEY='notas-pdf-lote-compartilhado';
+let exportBusy=false,exportNotes=[],awaitingExport=[];
+try{const saved=JSON.parse(localStorage.getItem(EXPORT_KEY)||'[]');if(Array.isArray(saved))awaitingExport=saved}catch(_){}
+function rememberExport(notes){awaitingExport=notes.map(n=>({id:n.id,date:n.date,name:nome(n)}));try{localStorage.setItem(EXPORT_KEY,JSON.stringify(awaitingExport))}catch(_){}}
+function awaitingNote(n){return awaitingExport.some(x=>x.id===n.id&&x.date===n.date&&x.name===nome(n))}
+function exportBatch(){return exportNotes.filter(n=>!n.ok).sort((a,b)=>a.date-b.date||a.id-b.id).slice(0,EXPORT_LIMIT)}
+function pendingConfirmation(){return exportNotes.filter(n=>!n.ok&&awaitingNote(n))}
+function exportUI(){
+  const pend=exportNotes.filter(n=>!n.ok).length,done=exportNotes.length-pend,confirming=pendingConfirmation().length;
+  $('#expInfo').textContent=exportNotes.length+' nota(s) · '+done+' exportada(s) · '+pend+' pendente(s)';
+  $('#expRetry').hidden=!confirming;$('#expRetry').disabled=exportBusy;
+  if(!exportBusy){$('#exp').textContent=confirming?'Confirmar '+confirming+' salva(s) no Drive':pend?'Exportar próximas '+Math.min(EXPORT_LIMIT,pend)+' notas':'Tudo exportado';$('#exp').disabled=!pend}
+  else $('#exp').disabled=true;
+  $('#lim').disabled=exportBusy||!done;$('#lim').textContent=done?'Apagar '+done+' exportadas':'Apagar exportadas';
+}
 const nome=n=>String(n.nm||n.num).replace(/[^\w.-]+/g,'_')+'.pdf';
 function baixar(n){const a=document.createElement('a');a.href=URL.createObjectURL(n.blob);a.download=nome(n);document.body.appendChild(a);a.click();a.remove()}
 async function render(){
   const l=(await all()).sort((a,b)=>b.date-a.date),pend=l.filter(n=>!n.ok).length;
-  $('#exp').textContent=pend?'Exportar tudo para o Drive ('+pend+')':'Tudo exportado';
-  $('#exp').disabled=!pend;
+  exportNotes=l;exportUI();
   const box=$('#lista');box.innerHTML=l.length?'':'<p class="vz">Nenhuma nota salva ainda.</p>';
   l.forEach(n=>{
     const d=document.createElement('div');d.className='nota';
     d.innerHTML='<b>'+esc(nome(n))+'</b>'+(n.tipo==='ped'?' (Pedido)':n.tipo==='orc'||n.tipo===undefined?' (Orçamento)':'')+(n.conf&&n.conf!=='alta'?' <span class="pe">conferir</span>':'')+'<small>'+n.pages+' pág., '+new Date(n.date).toLocaleString('pt-BR')+', <span class="'+(n.ok?'ok':'pe')+'">'+(n.ok?'Exportada':'Pendente')+'</span></small><div class="ac"><button data-a="v">Abrir</button><button data-a="b">Baixar</button><button data-a="r">Renomear</button><button data-a="x">Excluir</button></div>';
     d.onclick=async e=>{
       const a=e.target.dataset.a;if(!a)return;
+      if((a==='r'||a==='x')&&(exportBusy||(!n.ok&&awaitingNote(n))))return toast('Conclua ou cancele a confirmação do lote antes de alterar esta nota.');
       if(a==='v')window.open(URL.createObjectURL(n.blob));
       if(a==='b')baixar(n);
       if(a==='r'){if(n.ok)return toast('Já exportada: renomeie também no Drive');const v=prompt('Novo nome do PDF (sem .pdf):',n.nm||n.num);if(v&&v.trim()){n.nm=v.trim();n.conf='alta';await put(n);render()}}
@@ -654,7 +671,6 @@ async function render(){
     };
     box.appendChild(d);
   });
-  $('#lim').disabled=!l.some(n=>n.ok);
   espaco(l);
 }
 
@@ -662,6 +678,7 @@ async function render(){
 let tok=null;
 const CID=()=>localStorage.getItem('cid')||'';
 $('#cfg').onclick=()=>{
+  if(exportBusy||pendingConfirmation().length)return toast('Conclua o lote atual primeiro.');
   const v=prompt('Client ID do Google (OAuth, tipo "Aplicativo da Web"). Deixe vazio para usar só compartilhar/baixar:',CID());
   if(v!==null){localStorage.setItem('cid',v.trim());localStorage.removeItem('fid')}
 };
@@ -690,25 +707,49 @@ async function enviar(t,f,n){
   const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{Authorization:'Bearer '+t},body:fd});
   if(!r.ok){localStorage.removeItem('fid');throw new Error('Erro '+r.status)}
 }
+$('#expRetry').onclick=()=>{
+  if(exportBusy)return;
+  if(!confirm('Os arquivos deste lote não foram salvos? Ao liberar nova tentativa, eles continuarão pendentes.'))return;
+  rememberExport([]);exportUI();toast('Lote liberado para nova tentativa.');
+};
 $('#exp').onclick=async()=>{
-  const pend=(await all()).filter(n=>!n.ok);if(!pend.length)return;
+  if(exportBusy)return;
+  const confirming=pendingConfirmation();
+  if(confirming.length){
+    if(!confirm('Você conferiu no Google Drive e confirmou que os '+confirming.length+' PDFs foram realmente salvos?'))return;
+    exportBusy=true;exportUI();$('#exp').textContent='Confirmando salvamento…';
+    try{
+      for(const n of confirming)await put({...n,ok:true});
+      rememberExport([]);toast(confirming.length+' nota(s) confirmada(s). Você já pode apagar as exportadas.');
+    }catch(e){toast('Não consegui registrar todas as confirmações: '+(e.message||e))}
+    finally{exportBusy=false;await render()}
+    return;
+  }
+  const pend=exportBatch();if(!pend.length)return;
   const duv=pend.filter(n=>n.conf&&n.conf!=='alta').length;
-  if(duv&&!confirm(duv+' nota(s) estão marcadas "conferir" (leitura incerta). Exportar mesmo assim?'))return;
-  const btn=$('#exp');btn.disabled=true;
+  if(duv&&!confirm(duv+' nota(s) neste lote estão marcadas "conferir" (leitura incerta). Exportar mesmo assim?'))return;
+  exportBusy=true;exportUI();const btn=$('#exp');btn.textContent='Preparando '+pend.length+' PDFs…';
+  let sent=0;
   try{
     if(!CID()){
       const files=pend.map(n=>new File([n.blob],nome(n),{type:'application/pdf'}));
-      if(navigator.canShare&&navigator.canShare({files})){
+      if(navigator.share&&navigator.canShare&&navigator.canShare({files})){
         await navigator.share({files,title:'Notas'});
-        for(const n of pend){n.ok=true;await put(n)}
-      }else{pend.forEach(baixar);toast('PDFs baixados. Configure o Drive para enviar direto.')}
+        rememberExport(pend);
+        toast('Confira o salvamento no Drive e depois confirme o lote aqui.');
+      }else{
+        toast('Não foi possível compartilhar este lote. Nenhuma nota foi marcada como exportada. Configure o Drive ou baixe as notas individualmente.');
+      }
     }else{
-      const t=await auth(),f=await pasta(t);let i=0;
-      for(const n of pend){btn.textContent='Enviando '+(++i)+' de '+pend.length+'…';await enviar(t,f,n);n.ok=true;await put(n)}
-      toast('Enviado para a pasta "Notas - Orçamentos"');
+      const t=await auth(),f=await pasta(t);
+      for(const n of pend){
+        btn.textContent='Enviando '+(sent+1)+' de '+pend.length+'…';
+        await enviar(t,f,n);await put({...n,ok:true});sent++;
+      }
+      toast(sent+' nota(s) enviadas ao Drive. Você já pode apagar as exportadas.');
     }
-  }catch(e){if(e.name!=='AbortError')toast('Falhou: '+(e.message||e))}
-  render();
+  }catch(e){if(e.name!=='AbortError')toast('Falhou'+(sent?' após '+sent+' envio(s)':'')+': '+(e.message||e)+'. Confira o Drive antes de tentar novamente.')}
+  finally{exportBusy=false;await render()}
 };
 
 updateQueue();render();proteger().then(render);
