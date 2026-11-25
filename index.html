@@ -602,7 +602,7 @@ async function capturarCamera(){
   }catch(_){if(session===camSession)$('#camStatus').textContent='Não consegui capturar. Tente novamente.'}
   finally{if(session===camSession){camBusy=false;atualizarCamera();$('#camStrip').scrollLeft=$('#camStrip').scrollWidth}}
 }
-$('#camOpen').onclick=abrirCamera;
+$('#camOpen').onclick=()=>$('#cam').click();
 $('#camCapture').onclick=capturarCamera;
 $('#camDone').onclick=()=>{if(camBusy||camFocusing||!camShots.length)return;const fs=camShots.map(s=>s.file);fecharCamera();enfileirarFotos(fs)};
 $('#camCancel').onclick=()=>{if(!camShots.length||confirm('Descartar as '+camShots.length+' foto(s) desta sessão?'))fecharCamera()};
