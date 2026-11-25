@@ -136,7 +136,7 @@ body.review-open{overflow:hidden}#toast{z-index:40}
   <p id="camStatus" role="status" aria-live="polite">Abrindo a câmera…</p>
   <div id="camStrip" aria-label="Fotos capturadas"></div>
   <div id="camActions"><button type="button" id="camCapture" class="pri" disabled>Capturar foto</button><button type="button" id="camDone" disabled>Finalizar (0)</button></div>
-  <button type="button" id="camNative" hidden>Usar câmera do celular (uma foto por vez)</button>
+  <button type="button" id="camNative" hidden>Câmera nativa do celular (alternativa, uma foto por vez)</button>
 </div>
 
 <div id="reviewModal" role="dialog" aria-modal="true" aria-labelledby="reviewTitle" hidden>
@@ -378,7 +378,7 @@ function atualizarCamera(){
   const strip=$('#camStrip');strip.replaceChildren();
   camShots.forEach((shot,i)=>{
     const d=document.createElement('div');d.className='camShot';
-    const im=document.createElement('img');im.src=shot.url;im.alt='Foto '+(i+1);
+    const im=document.createElement('img');im.src=shot.url;im.alt='Foto '+(i+1);im.title=shot.dimensoes||im.alt;
     const b=document.createElement('button');b.type='button';b.textContent='×';b.setAttribute('aria-label','Remover foto '+(i+1));
     b.onclick=()=>{URL.revokeObjectURL(shot.url);camShots=camShots.filter(x=>x!==shot);atualizarCamera();if(camReady)$('#camStatus').textContent=camShots.length+' foto(s) capturada(s). Continue ou finalize.'};
     d.append(im,b);strip.appendChild(d);
@@ -409,11 +409,18 @@ async function abrirCamera(){
   $('#camStatus').textContent='Abrindo a câmera…';atualizarCamera();$('#camCancel').focus();
   try{
     if(!navigator.mediaDevices?.getUserMedia)throw new Error('camera indisponível');
-    const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160}}});
+    const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:4096},height:{ideal:3072},aspectRatio:{ideal:4/3}}});
     if(session!==camSession){stream.getTracks().forEach(t=>t.stop());return}
-    camStream=stream;camVideo.srcObject=stream;await camVideo.play();
+    camStream=stream;
+    const track=stream.getVideoTracks()[0];
+    try{
+      const caps=track.getCapabilities?.()||{};
+      if(caps.focusMode?.includes('continuous'))await track.applyConstraints({advanced:[{focusMode:'continuous'}]});
+    }catch(_){}
     if(session!==camSession)return;
-    camReady=true;atualizarCamera();$('#camStatus').textContent='Enquadre a nota e capture quantas fotos quiser.';
+    camVideo.srcObject=stream;await camVideo.play();
+    if(session!==camSession)return;
+    camReady=true;atualizarCamera();$('#camNative').hidden=false;$('#camStatus').textContent='Enquadre a nota, aguarde o foco e capture. Vídeo: '+camVideo.videoWidth+' × '+camVideo.videoHeight+' px.';
     stream.getVideoTracks().forEach(t=>t.addEventListener('ended',()=>{if(session===camSession)erroCamera()}));
   }catch(e){if(session===camSession)erroCamera(e)}
 }
@@ -424,19 +431,39 @@ async function capturarCamera(){
   try{
     let blob;
     // Usa a foto em resolução nativa quando o navegador oferecer ImageCapture.
-    if(typeof ImageCapture==='function'&&camStream){try{blob=await new ImageCapture(camStream.getVideoTracks()[0]).takePhoto()}catch(_){}}
+    let modo='vídeo';
+    if(typeof ImageCapture==='function'&&camStream){
+      try{
+        const capture=new ImageCapture(camStream.getVideoTracks()[0]);
+        let options={};
+        try{
+          const caps=await capture.getPhotoCapabilities();
+          if(Number.isFinite(caps.imageWidth?.max)&&caps.imageWidth.max>0)options.imageWidth=caps.imageWidth.max;
+          if(Number.isFinite(caps.imageHeight?.max)&&caps.imageHeight.max>0)options.imageHeight=caps.imageHeight.max;
+        }catch(_){}
+        try{blob=await capture.takePhoto(options)}catch(_){blob=await capture.takePhoto()}
+        if(blob?.size)modo='foto';
+      }catch(_){}
+    }
     if(session!==camSession)return;
     if(!blob||!blob.size){
       const c=document.createElement('canvas');c.width=camVideo.videoWidth;c.height=camVideo.videoHeight;
       c.getContext('2d').drawImage(camVideo,0,0);
-      blob=await new Promise(res=>c.toBlob(res,'image/jpeg',.95));
+      blob=await new Promise(res=>c.toBlob(res,'image/jpeg',.99));
     }
     if(session!==camSession)return;
     if(!blob||!blob.size)throw new Error('captura');
     const ext=blob.type==='image/png'?'png':blob.type==='image/webp'?'webp':'jpg';
     const file=new File([blob],'foto-'+Date.now()+'-'+(++camSeq)+'.'+ext,{type:blob.type||'image/jpeg'});
-    camShots.push({file,url:URL.createObjectURL(file)});
-    $('#camStatus').textContent=camShots.length+' foto(s) capturada(s). Continue ou finalize.';
+    const url=URL.createObjectURL(file);
+    let dimensoes='';
+    try{
+      const im=new Image();im.src=url;await im.decode();
+      dimensoes=im.naturalWidth+' × '+im.naturalHeight+' px';
+    }catch(_){}
+    if(session!==camSession){URL.revokeObjectURL(url);return}
+    camShots.push({file,url,dimensoes,modo});
+    $('#camStatus').textContent=camShots.length+' foto(s). Última: '+(dimensoes||'resolução não informada')+' ('+modo+'). Continue ou finalize.';
   }catch(_){if(session===camSession)$('#camStatus').textContent='Não consegui capturar. Tente novamente.'}
   finally{if(session===camSession){camBusy=false;atualizarCamera();$('#camStrip').scrollLeft=$('#camStrip').scrollWidth}}
 }
