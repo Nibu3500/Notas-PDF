@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#14202B">
+<title>Notas em PDF</title>
+<style>
+:root{--bg:#E8EAEC;--ink:#14202B;--mut:#5B6773;--line:#C9CED3;--ac:#0B57D0;--ok:#1E7B4F;--pe:#9A5B00;--rd:#B3261E}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:0 14px 96px}
+header{display:flex;justify-content:space-between;align-items:center;padding:16px 0 10px}
+h1{font-size:22px;margin:0}
+h2{font-size:16px;margin:22px 0 8px}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px}
+label.t{display:block;font-size:14px;color:var(--mut);margin-bottom:4px}
+input[type=text]{width:100%;font:inherit;padding:12px;border:1px solid var(--line);border-radius:8px;background:#fff}
+input[type=text]:focus,button:focus-visible{outline:3px solid #8AB4F8;outline-offset:1px}
+button,.btn{font:inherit;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);padding:11px 14px;border-radius:8px;cursor:pointer;text-align:center}
+.pri{background:var(--ac);border-color:var(--ac);color:#fff}
+button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:8px;margin-top:12px}
+.row>*{flex:1}
+#thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;margin-top:12px}
+.th{position:relative;border:1px solid var(--line);border-radius:6px;overflow:hidden;aspect-ratio:3/4;background:#ddd}
+.th img{width:100%;height:100%;object-fit:cover;display:block}
+.th b{position:absolute;left:4px;top:4px;background:var(--ink);color:#fff;font-size:12px;padding:1px 6px;border-radius:4px}
+.th button{position:absolute;right:3px;top:3px;padding:0 7px;line-height:24px;font-size:16px;color:var(--rd)}
+.nota{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px}
+.nota small{display:block;color:var(--mut);font-size:13px;margin:2px 0 8px}
+.nota .ac{display:flex;gap:6px}
+.nota .ac button{flex:1;padding:8px 4px;font-size:14px}
+.ok{color:var(--ok);font-weight:600}.pe{color:var(--pe);font-weight:600}
+.vz{color:var(--mut)}
+.h2r{display:flex;justify-content:space-between;align-items:center;margin:22px 0 8px}
+.h2r h2{margin:0}
+.h2r button{padding:6px 10px;font-size:13px}
+#esp{margin-top:14px;font-size:13px;color:var(--mut)}
+#esp i{display:block;height:6px;background:#D5D9DD;border-radius:3px;margin-top:6px;overflow:hidden}
+#esp i b{display:block;height:100%;background:var(--ac)}
+#ocr{font-size:14px;margin-top:6px;min-height:1.4em}
+#ocr button{padding:2px 8px;font-size:13px}
+#bar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom,0px));background:var(--ink)}
+#bar button{width:100%;background:#fff}
+#toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90%;text-align:center}
+#toast.on{opacity:1}
+input[type=file]{display:none}
+/* Câmera contínua */
+#cameraModal[hidden]{display:none}
+#cameraModal{position:fixed;inset:0;z-index:20;background:#101820;color:#fff;display:flex;flex-direction:column;gap:10px;padding:calc(12px + env(safe-area-inset-top,0px)) 14px calc(12px + env(safe-area-inset-bottom,0px));overflow:auto}
+#cameraModal .camhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+#cameraModal h2{margin:0;font-size:18px}
+#cameraModal .camhead button{padding:7px 12px}
+#camView{flex:1;min-height:140px;position:relative;display:flex;align-items:center;justify-content:center;background:#000;border-radius:10px;overflow:hidden}
+#camVideo{width:100%;height:100%;position:absolute;inset:0;object-fit:contain}
+#camFlash{position:absolute;inset:0;pointer-events:none;background:#fff;opacity:0;transition:opacity .15s}
+#camFlash.on{opacity:.65;transition:none}
+#camStatus{font-size:14px;margin:0;color:#dbe5ef;min-height:1.4em}
+#camStrip{display:flex;gap:8px;overflow-x:auto;flex-shrink:0;padding:2px 0}
+#camStrip:empty{display:none}
+.camShot{position:relative;flex:0 0 66px;height:82px;border-radius:6px;overflow:hidden;background:#354351}
+.camShot img{width:100%;height:100%;object-fit:cover}
+.camShot button{position:absolute;right:2px;top:2px;padding:0 6px;font-size:16px;line-height:24px;color:var(--rd)}
+#camActions{display:flex;gap:8px;flex-shrink:0}
+#camActions button{flex:1;padding:14px 8px}
+#camNative{width:100%;flex-shrink:0}
+body.camera-open{overflow:hidden}
+@media(prefers-reduced-motion:reduce){#toast,#camFlash{transition:none}}
+
+/* Fila e conferência */
+#queuePanel[hidden],#reviewModal[hidden]{display:none}
+#queuePanel{margin-top:16px}
+#queuePanel h2{margin:0;font-size:18px}
+.qtop{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.qtop button{font-size:12px;padding:7px}
+.qbar{height:8px;background:#e1e5e9;border-radius:8px;overflow:hidden;margin:8px 0}
+.qbar>span{display:block;height:100%;background:var(--ac);transition:width .2s}
+.qstats{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center;margin:12px 0;font-size:11px;color:var(--mut)}
+.qstats b{display:block;font-size:19px;color:var(--ink)}
+#queueList{max-height:470px;overflow:auto;overscroll-behavior:contain}
+.qitem{display:flex;gap:10px;align-items:center;border-top:1px solid #e1e5e9;padding:10px 0}
+.qthumb{width:54px;height:70px;object-fit:contain;background:#eef1f4;border-radius:5px;flex-shrink:0}
+.qbody{min-width:0;flex:1}.qbody strong{display:block;font-size:14px;overflow-wrap:anywhere}.qbody small{display:block;font-size:12px;color:var(--mut)}
+.qitem button{font-size:12px;padding:7px;flex-shrink:0}.qitem .qbar{height:5px;margin:5px 0}
+.qitem[data-state=done] .qbar span{background:var(--ok)}.qitem[data-state=review] .qbar span{background:var(--pe)}
+.qcontrols{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.qcontrols button{flex:1;font-size:12px;padding:8px}
+#reviewModal{position:fixed;inset:0;z-index:30;background:#fff;display:flex;flex-direction:column;padding:12px;gap:8px;overflow:auto}
+.reviewhead{display:flex;justify-content:space-between;align-items:center;gap:6px}.reviewhead h2{margin:0;font-size:17px}.reviewhead button{padding:7px 10px}
+#reviewView{flex:1;min-height:160px;background:#26333e;border-radius:8px;overflow:auto;text-align:center;touch-action:pan-x pan-y pinch-zoom}
+#reviewImage{display:block;margin:auto;max-width:none;object-fit:contain}
+#reviewTools{display:flex;gap:5px}#reviewTools button{flex:1;padding:7px;font-size:13px}
+#reviewType{font:inherit;border:1px solid var(--line);padding:8px;border-radius:8px;background:#fff}
+#reviewNumber{font-size:20px}#reviewMsg{font-size:13px;color:var(--pe);margin:0}
+#reviewSave{width:100%}#reviewNav{display:flex;gap:6px}#reviewNav button{flex:1;padding:8px;font-size:13px}
+body.review-open{overflow:hidden}#toast{z-index:40}
+</style>
+</head>
+<body>
+<header><h1>Notas em PDF</h1><button id="cfg" aria-label="Configurar Drive">Configurar Drive</button></header>
+
+<div class="card">
+  <label class="t" for="num">Número da nota (opcional, para PDF manual com várias páginas)</label>
+  <input type="text" id="num" autocomplete="off" inputmode="numeric" placeholder="Deixe vazio para leitura automática">
+  <div id="ocr" class="vz" aria-live="polite"></div>
+  <div class="row">
+    <button type="button" class="pri" id="camOpen">Tirar foto</button>
+    <label class="btn" for="gal">Da galeria</label>
+  </div>
+  <input type="file" id="cam" accept="image/*" capture="environment">
+  <input type="file" id="gal" accept="image/*" multiple>
+  <input type="file" id="arq" accept=".jpg,.jpeg,.png,.webp" multiple>
+  <div class="row"><label class="btn" for="arq">Da pasta de arquivos (muitas fotos)</label></div>
+  <div id="thumbs"></div>
+  <div class="row"><button class="pri" id="gerar" disabled>Gerar PDF manual</button></div>
+</div>
+
+<section class="card" id="queuePanel" hidden>
+ <div class="qtop"><h2>Fila de processamento</h2><button id="clearDone">Limpar concluídas</button></div>
+ <div class="qtop"><strong id="qPercent">0%</strong><small id="qCount"></small></div>
+ <div class="qbar" role="progressbar" aria-label="Progresso estimado da fila" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="qFill" style="width:0%"></span></div>
+ <small class="vz" id="qTime"></small>
+ <div class="qstats"><div><b id="qDone">0</b>Salvas</div><div><b id="qActive">0</b>Processando</div><div><b id="qWait">0</b>Aguardando</div><div><b id="qReview">0</b>Conferir</div></div>
+ <div class="qcontrols"><button class="pri" id="openReview">Conferir notas</button><button id="retryAll">Reprocessar erros</button><button id="pauseQueue">Pausar fila</button></div>
+ <div id="queueList"></div>
+</section>
+
+<div class="h2r"><h2>Notas salvas</h2><button id="lim">Apagar exportadas</button></div>
+<div id="lista"></div>
+<div id="esp"></div>
+
+<div id="bar"><button id="exp">Exportar tudo para o Drive</button></div>
+<div id="toast" role="status"></div>
+<div id="cameraModal" role="dialog" aria-modal="true" aria-labelledby="camTitle" hidden>
+  <div class="camhead"><h2 id="camTitle">Câmera</h2><button type="button" id="camCancel">Cancelar</button></div>
+  <div id="camView"><video id="camVideo" autoplay playsinline muted></video><div id="camFlash"></div></div>
+  <p id="camStatus" role="status" aria-live="polite">Abrindo a câmera…</p>
+  <div id="camStrip" aria-label="Fotos capturadas"></div>
+  <div id="camActions"><button type="button" id="camCapture" class="pri" disabled>Capturar foto</button><button type="button" id="camDone" disabled>Finalizar (0)</button></div>
+  <button type="button" id="camNative" hidden>Usar câmera do celular (uma foto por vez)</button>
+</div>
+
+<div id="reviewModal" role="dialog" aria-modal="true" aria-labelledby="reviewTitle" hidden>
+ <div class="reviewhead"><h2 id="reviewTitle">Conferir nota</h2><button id="reviewClose">Fechar</button></div>
+ <p id="reviewMsg"></p>
+ <div id="reviewView"><img id="reviewImage" alt="Foto original da nota"></div>
+ <div id="reviewTools"><button id="zoomOut">− Zoom</button><button id="zoomIn">+ Zoom</button><button id="rotateReview">Girar 90°</button></div>
+ <label class="t" for="reviewNumber">Número correto da nota / nome do PDF</label>
+ <input type="text" id="reviewNumber" inputmode="numeric" autocomplete="off" placeholder="Ex.: 265942">
+ <select id="reviewType" aria-label="Tipo de nota"><option value="orc">Orçamento</option><option value="ped">Pedido</option><option value="">Nota</option></select>
+ <button class="pri" id="reviewSave">Salvar PDF e próxima</button>
+ <div id="reviewNav"><button id="reviewPrev">Anterior</button><button id="reviewNext">Próxima</button><button id="reviewRetry">Tentar OCR</button><button id="reviewDelete">Excluir</button></div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let fotos=[],tt;
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),3200)}
+
+/* ---------- Armazenamento (IndexedDB) ---------- */
+let semDb=false,mem=[],memId=1;
+const dbp=new Promise((res,rej)=>{try{const r=indexedDB.open('notas-pdf',1);r.onupgradeneeded=()=>r.result.createObjectStore('n',{keyPath:'id',autoIncrement:true});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}}).catch(()=>{semDb=true;return null});
+async function st(mode,fn,mf){const db=await dbp;if(!db)return mf();return new Promise((res,rej)=>{const t=db.transaction('n',mode);const rq=fn(t.objectStore('n'));t.oncomplete=()=>res(rq&&rq.result);t.onerror=()=>rej(t.error)})}
+const all=()=>st('readonly',s=>s.getAll(),()=>mem.slice());
+const put=o=>st('readwrite',s=>s.put(o),()=>{if(!o.id)o.id=memId++;const i=mem.findIndex(x=>x.id===o.id);if(i<0)mem.push(o);else mem[i]=o});
+const del=id=>st('readwrite',s=>s.delete(id),()=>{mem=mem.filter(x=>x.id!==id)});
+
+/* ---------- Foto -> JPEG reduzido ---------- */
+function tojpg(c){return new Promise(res=>c.toBlob(async b=>res({w:c.width,h:c.height,c,url:URL.createObjectURL(b),bytes:new Uint8Array(await b.arrayBuffer())}),'image/jpeg',.82))}
+function abrir(file,max){return new Promise((res,rej)=>{
+  const u=URL.createObjectURL(file),im=new Image();
+  im.onload=()=>{
+    const k=Math.min(1,max/Math.max(im.width,im.height)),w=Math.round(im.width*k),h=Math.round(im.height*k);
+    const c=document.createElement('canvas');c.width=w;c.height=h;
+    const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);
+    URL.revokeObjectURL(u);res(c)};
+  im.onerror=()=>rej(new Error('img'));im.src=u})}
+async function proc(file){const g=await tojpg(await abrir(file,1800));g.file=file;return g}
+
+/* ---------- Leitura automática do nº do orçamento (OCR) ---------- */
+let ocrScript=null;
+function carregarBiblioteca(){if(window.Tesseract)return Promise.resolve();return ocrScript||(ocrScript=new Promise((res,rej)=>{
+ const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';sc.onload=res;sc.onerror=()=>{ocrScript=null;sc.remove();rej(new Error('Sem internet para OCR'))};document.head.appendChild(sc)}))}
+const workers=[null,null];
+async function carregarOcr(slot){await carregarBiblioteca();if(!workers[slot])workers[slot]=await Tesseract.createWorker('eng',1,{logger:m=>{const j=activeJobs[slot];if(j&&m.status==='recognizing text')ocrProgress(j,m.progress)}});return workers[slot]}
+function girar(c,d){if(!d)return c;const o=document.createElement('canvas'),q=d%180!==0;
+  o.width=q?c.height:c.width;o.height=q?c.width:c.height;
+  const x=o.getContext('2d');x.translate(o.width/2,o.height/2);x.rotate(d*Math.PI/180);x.drawImage(c,-c.width/2,-c.height/2);return o}
+function acharNum(txt){
+  // Mapa da Carga: "Orçamento 265942" (OCR às vezes lê "Orcamento"/"Orgamento").
+  // Ordem de Separação: "Pedido: 266276" (ignora "Peso Total do Pedido").
+  for(const [t,re] of [['orc',/Or.{0,2}amento[\s:;.,|_-]{0,4}(\d{5,8})\b/gi],['ped',/Ped\w{1,3}\s*[:;.,]?\s*(\d{5,8})\b/gi]]){
+    for(const m of txt.matchAll(re)){
+      if(!/do\s*$/i.test(txt.slice(Math.max(0,m.index-4),m.index)))return{n:m[1],t}}}
+  return null}
+function reduzir(c,m){const k=Math.min(1,m/Math.max(c.width,c.height));if(k===1)return c;
+  const o=document.createElement('canvas');o.width=Math.round(c.width*k);o.height=Math.round(c.height*k);o.getContext('2d').drawImage(c,0,0,o.width,o.height);return o}
+function acharRotulo(ws){
+  for(let i=0;i<ws.length;i++){
+    const t=ws[i].text||'';
+    if(/^(Or.{0,2}amento|Ped\w{1,3})[:;.]?$/i.test(t)){
+      const prev=i?(ws[i-1].text||''):'';
+      if(/^Observa|^do$|^Total$/i.test(prev))continue;
+      return{w:ws[i],t:/^Or/i.test(t)?'orc':'ped'}}}
+  return null}
+function cinza(c){
+  const x=c.getContext('2d'),d=x.getImageData(0,0,c.width,c.height),p=d.data;let lo=255,hi=0;
+  for(let i=0;i<p.length;i+=4){const y=(p[i]*299+p[i+1]*587+p[i+2]*114)/1000;p[i]=y;if(y<lo)lo=y;if(y>hi)hi=y}
+  const k=hi>lo?255/(hi-lo):1;
+  for(let i=0;i<p.length;i+=4){const v=(p[i]-lo)*k;p[i]=p[i+1]=p[i+2]=v}
+  x.putImageData(d,0,0);return c}
+function otsu(c){
+  const x=c.getContext('2d'),d=x.getImageData(0,0,c.width,c.height),p=d.data,h=new Array(256).fill(0);
+  for(let i=0;i<p.length;i+=4)h[p[i]|0]++;
+  const t=p.length/4;let s=0;for(let k=0;k<256;k++)s+=k*h[k];
+  let wb=0,sb=0,best=-1,th=128;
+  for(let k=0;k<256;k++){wb+=h[k];if(!wb)continue;const wf=t-wb;if(!wf)break;sb+=k*h[k];
+    const mb=sb/wb,mf=(s-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf);if(v>best){best=v;th=k}}
+  for(let i=0;i<p.length;i+=4){const v=p[i]>th?255:0;p[i]=p[i+1]=p[i+2]=v}
+  x.putImageData(d,0,0);return c}
+function preparar(src,sx,sy,sw,sh,H,bin){
+  const k=H/sh,w=Math.max(1,Math.round(sw*k)),B=24,c=document.createElement('canvas');
+  c.width=w+2*B;c.height=H+2*B;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
+  x.imageSmoothingQuality='high';x.drawImage(src,sx,sy,sw,sh,B,B,w,H);
+  cinza(c);return bin?otsu(c):c}
+// Relê só os dígitos, num recorte em alta resolução ao lado da palavra, com várias preparações da imagem
+async function votarDigitos(w,fr,k,L,prog){
+  const b=L.w.bbox,bw=(b.x1-b.x0)*k,bh=(b.y1-b.y0)*k,votos=[];
+  await w.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789'});
+  for(const px of [0.95,0.8]){
+    let sx=Math.max(0,b.x0*k+bw*px),sy=Math.max(0,b.y0*k-bh*0.5),sw=bw*(2.5-px),sh=bh*2;
+    sw=Math.min(sw,fr.width-sx);sh=Math.min(sh,fr.height-sy);
+    if(sw<10||sh<10)continue;
+    for(const H of [70,110])for(const bin of [false,true]){
+      prog("Conferindo dígitos");const{data}=await w.recognize(preparar(fr,sx,sy,sw,sh,H,bin));
+      const d=data.text.replace(/\D/g,'').replace(/^0+/,'');
+      if(d.length>=5&&d.length<=8)votos.push(d)}}
+  await w.setParameters({tessedit_char_whitelist:''});
+  return votos}
+async function lerNumero(g,prog,w){
+  const full=await abrir(g.file,4000);
+  const S={},T={},frs={};
+  const add=(n,f,t)=>{(S[n]||(S[n]=new Set())).add(f);if(t)T[n]=t};
+  const acordo=()=>{for(const n in S)if(S[n].size>=2)return n;return null};
+  const fim=(n,d)=>({n,t:T[n]||'orc',d,c:'alta'});
+  const rec=async(c,d,psm,id)=>{
+    prog("Reconhecendo número");await w.setParameters({tessedit_pageseg_mode:psm,tessedit_char_whitelist:''});
+    const r=girar(c,d),{data}=await w.recognize(r);
+    const m=data.text.match(/Nota\s*Fiscal\S*\s*[:;.,]?\s*(\d{5,8})\s*[\/\\|]\s*\d/i);if(m)add(m[1],'nf','orc');
+    const f=acharNum(data.text);if(f)add(f.n,'p'+id,f.t);
+    return{data,r,conf:data.confidence}};
+  const crop=async(x,d)=>{
+    const L=acharRotulo(x.data.words||[]);if(!L)return;
+    const fr=frs[d]||(frs[d]=girar(full,d)),v=await votarDigitos(w,fr,fr.width/x.r.width,L,prog);
+    if(!v.length)return;
+    const cnt={};v.forEach(n=>cnt[n]=(cnt[n]||0)+1);
+    const[n,c]=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
+    if(c>=3&&c/v.length>=.5){add(n,'c',L.t);if(c>=6&&c/v.length>=.75)add(n,'c2',L.t)}};
+  // 1) orientação + primeira leitura (rápida)
+  const s1=reduzir(full,1000),rank=[];
+  for(const d of [0,90,270,180]){
+    const x=await rec(s1,d,'11','o'+d);await crop(x,d);
+    const n=acordo();if(n)return fim(n,d);
+    rank.push({d,conf:x.conf});
+    if(x.conf>=65)break}
+  rank.sort((a,b)=>b.conf-a.conf);const d1=rank[0].d;
+  // 2) leituras em resolução maior; para quando duas fontes independentes concordam
+  for(const[m,psm] of [[1800,'3'],[2600,'11'],[3000,'3']]){
+    const x=await rec(reduzir(full,m),d1,psm,m+psm);await crop(x,d1);
+    const n=acordo();if(n)return fim(n,d1)}
+  if(rank[1]){const x=await rec(reduzir(full,1800),rank[1].d,'3','alt');await crop(x,rank[1].d);
+    const n=acordo();if(n)return fim(n,rank[1].d)}
+  // 3) sem acordo: devolve o melhor candidato, marcado para conferência
+  const ks=Object.keys(S);if(!ks.length)return null;
+  ks.sort((a,b)=>(S[b].size-S[a].size)||(+S[b].has('c')-+S[a].has('c')));
+  const n=ks[0];
+  return{n,t:T[n]||'orc',d:d1,c:S[n].has('c')?'media':'baixa',nf:S[n].size===1&&S[n].has('nf')}}
+
+/* ---------- Gerador de PDF (sem bibliotecas) ---------- */
+function pdf(num,imgs,tipo){
+  const E=new TextEncoder(),P=[],O=[];let L=0;
+  const p=x=>{const b=typeof x==='string'?E.encode(x):x;P.push(b);L+=b.length};
+  const o=(id,f)=>{O[id]=L;p(id+' 0 obj\n');f();p('endobj\n')};
+  const n=imgs.length,t=String(num).replace(/[^\w\-. \/]/g,'');
+  p('%PDF-1.4\n');
+  o(1,()=>p('<</Type/Catalog/Pages 2 0 R>>\n'));
+  o(2,()=>p('<</Type/Pages/Count '+n+'/Kids['+imgs.map((_,i)=>(4+3*i)+' 0 R').join(' ')+']>>\n'));
+  o(3,()=>p('<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold/Encoding/WinAnsiEncoding>>\n'));
+  imgs.forEach((g,i)=>{
+    const s=Math.min(515/g.w,730/g.h),dw=(g.w*s).toFixed(1),dh=(g.h*s).toFixed(1),x=((595-g.w*s)/2).toFixed(1),y=(40+(730-g.h*s)/2).toFixed(1);
+    const c='BT/F1 20 Tf 40 800 Td ('+(tipo==='ped'?'Pedido':tipo==='orc'?'Or\\347amento':'Nota')+' N\\272 '+t+')Tj ET\nBT/F1 9 Tf 490 804 Td (P\\341g. '+(i+1)+'/'+n+')Tj ET\nq '+dw+' 0 0 '+dh+' '+x+' '+y+' cm/Im0 Do Q\n';
+    o(4+3*i,()=>p('<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Resources<</Font<</F1 3 0 R>>/XObject<</Im0 '+(6+3*i)+' 0 R>>>>/Contents '+(5+3*i)+' 0 R>>\n'));
+    o(5+3*i,()=>p('<</Length '+c.length+'>>\nstream\n'+c+'endstream\n'));
+    o(6+3*i,()=>{p('<</Type/XObject/Subtype/Image/Width '+g.w+'/Height '+g.h+'/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length '+g.bytes.length+'>>\nstream\n');p(g.bytes);p('\nendstream\n')});
+  });
+  const N=4+3*n,xr=L;
+  p('xref\n0 '+N+'\n0000000000 65535 f \n');
+  for(let i=1;i<N;i++)p(String(O[i]).padStart(10,'0')+' 00000 n \n');
+  p('trailer\n<</Size '+N+'/Root 1 0 R>>\nstartxref\n'+xr+'\n%%EOF');
+  return new Blob(P,{type:'application/pdf'});
+}
+
+/* ---------- Fila: dois workers independentes ---------- */
+let rt;const agendar=()=>{clearTimeout(rt);rt=setTimeout(render,500)};
+let saveChain=Promise.resolve();
+function salvar(num,tipo,gs,conf){
+ const task=saveChain.then(async()=>{const l=await all(),used=new Set(l.map(n=>n.nm||n.num));let nm=num,i=2;while(used.has(nm))nm=num+'_'+i++;
+ await put({num,nm,tipo,conf,date:Date.now(),pages:gs.length,blob:pdf(num,gs,tipo),ok:false});proteger();agendar();return nm});
+ saveChain=task.catch(()=>{});return task;
+}
+const jobs=[],activeJobs=[null,null];let seq=0,paused=false,started=0,finishedAt=0,queueTimer=0;
+const pendingReview=()=>jobs.filter(j=>j.state==='review');
+const manualJobs=()=>jobs.filter(j=>j.state==='manual');
+function release(j){if(j.url)URL.revokeObjectURL(j.url);j.url=null;j.file=null;if(j.el){j.el.remove();j.el=null}}
+function setJob(j,state,progress,msg){j.state=state;j.p=progress;j.msg=msg;updateQueue()}
+function ocrProgress(j,p){if(j.state!=='active')return;j.p=Math.max(j.p,Math.min(94,15+75*(j.steps+Math.max(0,Math.min(1,p||0)))/18));scheduleQueue()}
+function scheduleQueue(){if(!queueTimer)queueTimer=setTimeout(()=>{queueTimer=0;updateQueue()},150)}
+function updateQueue(){
+ const total=jobs.length,done=jobs.filter(j=>j.state==='done').length,active=jobs.filter(j=>j.state==='active'||j.state==='saving').length,waiting=jobs.filter(j=>j.state==='waiting').length,review=pendingReview().length,manual=manualJobs().length;
+ $('#queuePanel').hidden=!total;$('#qDone').textContent=done;$('#qActive').textContent=active;$('#qWait').textContent=waiting;$('#qReview').textContent=review+manual;
+ const p=total?Math.floor(jobs.reduce((n,j)=>n+j.p,0)/total):0;$('#qPercent').textContent=p+'%';$('#qFill').style.width=p+'%';$('#qFill').parentElement.setAttribute('aria-valuenow',p);$('#qCount').textContent=done+' de '+total+' fotos salvas';
+ const elapsed=started?Math.floor(((finishedAt||Date.now())-started)/1000):0;const fmt=t=>Math.floor(t/60)+'m '+t%60+'s';const ocrFinished=jobs.filter(j=>j.state==='done'||j.state==='review').length;
+ $('#qTime').textContent='Tempo: '+fmt(elapsed)+(active&&waiting&&ocrFinished?' · estimativa restante: '+fmt(Math.max(1,Math.ceil(elapsed/ocrFinished*(waiting+active)))):'')+' · progresso estimado; conferência manual não incluída.';
+ $('#openReview').disabled=!review;$('#openReview').textContent='Conferir notas ('+review+')';$('#retryAll').disabled=!review;$('#clearDone').disabled=!done;$('#pauseQueue').disabled=!waiting&&!active;$('#pauseQueue').textContent=paused?'Retomar fila':'Pausar fila';$('#gerar').disabled=!manual;
+ for(const j of jobs){
+  if(!j.el){const d=document.createElement('div');d.className='qitem';d.innerHTML='<img class="qthumb" loading="lazy" alt="Foto"><div class="qbody"><strong></strong><small></small><div class="qbar"><span></span></div></div><button type="button">Prévia</button>';j.el=d;d.querySelector('button').onclick=()=>openReview(j);$('#queueList').appendChild(d)}
+  const d=j.el;d.dataset.state=j.state;const im=d.querySelector('img');if(j.url&&im.getAttribute('src')!==j.url)im.src=j.url;im.hidden=!j.url;
+  d.querySelector('strong').textContent='Foto '+j.id+(j.nm?' — '+j.nm+'.pdf':'');d.querySelector('small').textContent=j.msg+' · '+Math.floor(j.p)+'%';d.querySelector('.qbar span').style.width=j.p+'%';d.querySelector('button').hidden=j.state!=='review'&&j.state!=='manual';
+ }
+ $('#ocr').textContent=manual?manual+' foto(s) para PDF manual. Informe o número e toque em Gerar PDF manual.':review?review+' nota(s) precisam de conferência.':active||waiting?'Processamento automático em andamento.':total?'Fila finalizada.':'';
+}
+async function runJob(j,slot){
+ activeJobs[slot]=j;setJob(j,'active',5,'Preparando foto');j.steps=0;
+ try{
+  const g=await proc(j.file);try{setJob(j,'active',12,'Carregando reconhecimento');const w=await carregarOcr(slot);
+  const r=await lerNumero(g,label=>{j.steps++;j.msg=label;j.p=Math.max(j.p,Math.min(92,15+75*j.steps/18));scheduleQueue()},w);
+  if(r){j.suggest=r.n;j.tipo=r.t;j.angle=r.d||0}
+  if(!r||r.c!=='alta'||r.nf){setJob(j,'review',100,r?'Leitura incerta — confira '+r.n:'Número não reconhecido');return}
+  setJob(j,'saving',96,'Gerando PDF');let rotated=null;try{rotated=r.d?await tojpg(girar(g.c,r.d)):null;j.nm=await salvar(r.n,r.t,[rotated||g],'alta')}finally{if(rotated)URL.revokeObjectURL(rotated.url)}
+  release(j);setJob(j,'done',100,'PDF salvo');
+  }finally{URL.revokeObjectURL(g.url)}
+ }catch(e){setJob(j,'review',100,'Falha no processamento — confira ou tente novamente');if(workers[slot]){try{await workers[slot].terminate()}catch(_){}workers[slot]=null}}
+ finally{activeJobs[slot]=null;pump()}
+}
+function pump(){if(!paused)for(let slot=0;slot<2;slot++){if(!activeJobs[slot]){const j=jobs.find(x=>x.state==='waiting');if(j)runJob(j,slot)}}if(!activeJobs.some(Boolean)&&!jobs.some(j=>j.state==='waiting'||j.state==='saving'))finishedAt=Date.now();updateQueue()}
+function enfileirarFotos(fs){if(!fs.length)return;if(!jobs.length){started=Date.now();finishedAt=0}if(finishedAt){started=Date.now();finishedAt=0}const manual=!!$('#num').value.trim();for(const file of fs)jobs.push({id:++seq,file,url:URL.createObjectURL(file),state:manual?'manual':'waiting',p:0,msg:manual?'PDF manual':'Aguardando processamento',steps:0});pump()}
+function addFotos(e){const fs=[...e.target.files];e.target.value='';enfileirarFotos(fs)}
+function retry(j){if(j.state!=='review')return;j.suggest='';j.angle=0;j.p=0;j.msg='Aguardando nova leitura';j.state='waiting';finishedAt=0}
+$('#retryAll').onclick=()=>{for(const j of pendingReview())retry(j);paused=false;pump()};
+$('#pauseQueue').onclick=()=>{paused=!paused;pump()};
+$('#clearDone').onclick=()=>{for(let i=jobs.length-1;i>=0;i--)if(jobs[i].state==='done'){release(jobs[i]);jobs.splice(i,1)}if(!jobs.length){started=0;finishedAt=0}updateQueue()};
+setInterval(()=>{if(activeJobs.some(Boolean))scheduleQueue()},1000);
+window.addEventListener('beforeunload',e=>{if(jobs.some(j=>j.state!=='done')||camShots.length){e.preventDefault();e.returnValue=''}});
+/* ---------- Prévia e correção manual ---------- */
+let reviewing=null,zoom=1,reviewAngle=0,reviewBusy=false,previewToken=0,previewUrl=null;
+const reviewable=()=>jobs.filter(j=>j.state==='review'||j.state==='manual');
+function closeReview(){if(reviewBusy)return;previewToken++;if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=null;reviewing=null;$('#reviewModal').hidden=true;$('#reviewImage').removeAttribute('src');document.body.classList.remove('review-open')}
+async function drawPreview(){const j=reviewing,token=++previewToken;if(!j)return;try{const c=girar(await abrir(j.file,4000),reviewAngle),g=await tojpg(c);if(token!==previewToken){URL.revokeObjectURL(g.url);return}if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=g.url;const im=$('#reviewImage');im.src=previewUrl;im.style.width=Math.round(zoom*100)+'%';im.style.height='auto';$('#reviewView').scrollTop=0;$('#reviewView').scrollLeft=0}catch(_){if(token===previewToken){$('#reviewImage').removeAttribute('src');$('#reviewMsg').textContent='Não foi possível abrir esta imagem.'}}}
+function openReview(j){if(reviewBusy||!j||!reviewable().includes(j))return;reviewing=j;zoom=1;reviewAngle=j.angle||0;const l=reviewable(),i=l.indexOf(j);$('#reviewTitle').textContent='Foto '+j.id+' · '+(i+1)+' de '+l.length;$('#reviewMsg').textContent=j.msg;$('#reviewNumber').value=j.suggest|| (j.state==='manual'?$('#num').value.trim():'');$('#reviewType').value=j.tipo??'orc';$('#reviewModal').hidden=false;document.body.classList.add('review-open');$('#reviewPrev').disabled=i===0;$('#reviewNext').disabled=i===l.length-1;$('#reviewRetry').disabled=j.state==='manual';$('#reviewImage').removeAttribute('src');drawPreview()}
+function nextReview(j){const l=reviewable();return l.find(x=>x.id>j.id)||l[0]||null}
+function moveReview(dir){const l=reviewable(),i=l.indexOf(reviewing),j=l[i+dir];if(j)openReview(j)}
+$('#openReview').onclick=()=>openReview(pendingReview()[0]);$('#reviewClose').onclick=closeReview;$('#reviewPrev').onclick=()=>moveReview(-1);$('#reviewNext').onclick=()=>moveReview(1);
+$('#zoomIn').onclick=()=>{zoom=Math.min(4,zoom+.5);$('#reviewImage').style.width=zoom*100+'%'};$('#zoomOut').onclick=()=>{zoom=Math.max(1,zoom-.5);$('#reviewImage').style.width=zoom*100+'%'};$('#rotateReview').onclick=()=>{reviewAngle=(reviewAngle+90)%360;drawPreview()};
+function reviewLock(on){reviewBusy=on;for(const el of $('#reviewModal').querySelectorAll('button,input,select'))el.disabled=on;if(!on&&reviewing){const l=reviewable(),i=l.indexOf(reviewing);$('#reviewPrev').disabled=i<=0;$('#reviewNext').disabled=i<0||i===l.length-1;$('#reviewRetry').disabled=reviewing.state==='manual'}}
+$('#reviewSave').onclick=async()=>{if(reviewBusy||!reviewing)return;const j=reviewing,num=$('#reviewNumber').value.trim(),tipo=$('#reviewType').value;if(!/^\d{1,20}$/.test(num))return toast('Informe o número correto da nota (somente dígitos)');reviewLock(true);let g=null;
+ try{g=await tojpg(girar(await abrir(j.file,1800),reviewAngle));j.nm=await salvar(num,tipo,[g],'alta');release(j);setJob(j,'done',100,'PDF salvo após conferência');reviewLock(false);const next=nextReview(j);if(next)openReview(next);else closeReview();toast('Salvo: '+j.nm+'.pdf')}
+ catch(e){toast('Falha ao salvar. A foto foi mantida.');reviewLock(false)}finally{if(g)URL.revokeObjectURL(g.url)}};
+$('#reviewRetry').onclick=()=>{if(!reviewing||reviewBusy)return;const j=reviewing;retry(j);const next=nextReview(j);if(next)openReview(next);else closeReview();paused=false;pump()};
+$('#reviewDelete').onclick=()=>{if(!reviewing||reviewBusy||!confirm('Excluir esta foto da fila?'))return;const j=reviewing;release(j);jobs.splice(jobs.indexOf(j),1);const next=nextReview(j);if(next)openReview(next);else closeReview();updateQueue()};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#reviewModal').hidden)closeReview()});
+/* ---------- Câmera contínua (capturas antes de iniciar o OCR) ---------- */
+let camStream=null,camShots=[],camSession=0,camBusy=false,camReady=false,camSeq=0;
+const camVideo=$('#camVideo'),camModal=$('#cameraModal');
+function atualizarCamera(){
+  $('#camDone').textContent='Finalizar ('+camShots.length+')';
+  $('#camDone').disabled=camBusy||!camShots.length;
+  $('#camCapture').disabled=camBusy||!camReady;
+  const strip=$('#camStrip');strip.replaceChildren();
+  camShots.forEach((shot,i)=>{
+    const d=document.createElement('div');d.className='camShot';
+    const im=document.createElement('img');im.src=shot.url;im.alt='Foto '+(i+1);
+    const b=document.createElement('button');b.type='button';b.textContent='×';b.setAttribute('aria-label','Remover foto '+(i+1));
+    b.onclick=()=>{URL.revokeObjectURL(shot.url);camShots=camShots.filter(x=>x!==shot);atualizarCamera();if(camReady)$('#camStatus').textContent=camShots.length+' foto(s) capturada(s). Continue ou finalize.'};
+    d.append(im,b);strip.appendChild(d);
+  });
+}
+function pararCamera(){
+  camReady=false;
+  if(camStream)camStream.getTracks().forEach(t=>t.stop());
+  camStream=null;camVideo.srcObject=null;
+}
+function fecharCamera(){
+  ++camSession;pararCamera();camBusy=false;
+  camShots.forEach(s=>URL.revokeObjectURL(s.url));camShots=[];
+  camModal.hidden=true;document.body.classList.remove('camera-open');atualizarCamera();$('#camOpen').focus();
+}
+function erroCamera(e){
+  pararCamera();camBusy=false;atualizarCamera();
+  $('#camNative').hidden=false;
+  $('#camStatus').textContent=!window.isSecureContext||!navigator.mediaDevices?.getUserMedia
+    ?'A câmera contínua precisa de um navegador compatível em HTTPS. Use a câmera do celular como alternativa.'
+    :e?.name==='NotAllowedError'?'Permissão da câmera negada. Libere nas configurações do navegador ou use a alternativa abaixo.'
+    :'Não foi possível abrir a câmera contínua. Use a alternativa abaixo.';
+}
+async function abrirCamera(){
+  if(!camModal.hidden)return;
+  const session=++camSession;camShots=[];camBusy=false;camReady=false;
+  camModal.hidden=false;document.body.classList.add('camera-open');$('#camNative').hidden=true;
+  $('#camStatus').textContent='Abrindo a câmera…';atualizarCamera();$('#camCancel').focus();
+  try{
+    if(!navigator.mediaDevices?.getUserMedia)throw new Error('camera indisponível');
+    const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160}}});
+    if(session!==camSession){stream.getTracks().forEach(t=>t.stop());return}
+    camStream=stream;camVideo.srcObject=stream;await camVideo.play();
+    if(session!==camSession)return;
+    camReady=true;atualizarCamera();$('#camStatus').textContent='Enquadre a nota e capture quantas fotos quiser.';
+    stream.getVideoTracks().forEach(t=>t.addEventListener('ended',()=>{if(session===camSession)erroCamera()}));
+  }catch(e){if(session===camSession)erroCamera(e)}
+}
+async function capturarCamera(){
+  if(camBusy||!camReady||!camVideo.videoWidth||!camVideo.videoHeight)return;
+  const session=camSession;camBusy=true;atualizarCamera();
+  const flash=$('#camFlash');flash.classList.add('on');setTimeout(()=>flash.classList.remove('on'),100);
+  try{
+    let blob;
+    // Usa a foto em resolução nativa quando o navegador oferecer ImageCapture.
+    if(typeof ImageCapture==='function'&&camStream){try{blob=await new ImageCapture(camStream.getVideoTracks()[0]).takePhoto()}catch(_){}}
+    if(session!==camSession)return;
+    if(!blob||!blob.size){
+      const c=document.createElement('canvas');c.width=camVideo.videoWidth;c.height=camVideo.videoHeight;
+      c.getContext('2d').drawImage(camVideo,0,0);
+      blob=await new Promise(res=>c.toBlob(res,'image/jpeg',.95));
+    }
+    if(session!==camSession)return;
+    if(!blob||!blob.size)throw new Error('captura');
+    const ext=blob.type==='image/png'?'png':blob.type==='image/webp'?'webp':'jpg';
+    const file=new File([blob],'foto-'+Date.now()+'-'+(++camSeq)+'.'+ext,{type:blob.type||'image/jpeg'});
+    camShots.push({file,url:URL.createObjectURL(file)});
+    $('#camStatus').textContent=camShots.length+' foto(s) capturada(s). Continue ou finalize.';
+  }catch(_){if(session===camSession)$('#camStatus').textContent='Não consegui capturar. Tente novamente.'}
+  finally{if(session===camSession){camBusy=false;atualizarCamera();$('#camStrip').scrollLeft=$('#camStrip').scrollWidth}}
+}
+$('#camOpen').onclick=abrirCamera;
+$('#camCapture').onclick=capturarCamera;
+$('#camDone').onclick=()=>{if(camBusy||!camShots.length)return;const fs=camShots.map(s=>s.file);fecharCamera();enfileirarFotos(fs)};
+$('#camCancel').onclick=()=>{if(!camShots.length||confirm('Descartar as '+camShots.length+' foto(s) desta sessão?'))fecharCamera()};
+$('#camNative').onclick=()=>{if(camShots.length)return $('#camStatus').textContent='Finalize as fotos capturadas antes de usar a outra câmera.';fecharCamera();$('#cam').click()};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!camModal.hidden)$('#camCancel').click()});
+window.addEventListener('pagehide',()=>{if(!camModal.hidden)fecharCamera()});
+$('#cam').onchange=addFotos;$('#gal').onchange=addFotos;$('#arq').onchange=addFotos;
+$('#gerar').onclick=async()=>{const num=$('#num').value.trim(),l=manualJobs();if(!/^\d{1,20}$/.test(num))return toast('Digite o número da nota (somente dígitos)');if(!l.length)return toast('Selecione as fotos com o número preenchido');const gs=[];l.forEach(j=>{j.state='saving';j.msg='Gerando PDF manual';j.p=95});updateQueue();try{for(const j of l)gs.push(await proc(j.file));const nm=await salvar(num,'',gs,'alta');for(const j of l){j.nm=nm;release(j);setJob(j,'done',100,'Página do PDF manual salvo')}$('#num').value='';toast('Salvo: '+nm+'.pdf')}catch(_){l.forEach(j=>setJob(j,'manual',0,'Falha ao salvar — tente novamente'));toast('Falha ao salvar; fotos mantidas')}finally{gs.forEach(g=>URL.revokeObjectURL(g.url));pump()}};
+
+/* ---------- Espaço e proteção dos dados ---------- */
+const mb=b=>b>=1e9?(b/1e9).toFixed(1)+' GB':(b/1e6).toFixed(b<1e7?1:0)+' MB';
+async function proteger(){try{if(navigator.storage&&navigator.storage.persist&&!(await navigator.storage.persisted()))await navigator.storage.persist()}catch(_){}}
+async function espaco(l){
+  if(semDb){$('#esp').innerHTML='<b>Atenção:</b> o navegador não permite guardar dados quando o arquivo é aberto direto do celular (endereço content://). As notas somem ao fechar a página. Hospede o arquivo em HTTPS (ex.: GitHub Pages) para salvar de verdade.';return}
+  const pdfs=l.reduce((a,n)=>a+n.blob.size,0);let u=pdfs,q=0,pers=false;
+  try{
+    if(navigator.storage&&navigator.storage.estimate){const e=await navigator.storage.estimate();u=e.usage||pdfs;q=e.quota||0}
+    if(navigator.storage&&navigator.storage.persisted)pers=await navigator.storage.persisted();
+  }catch(_){}
+  $('#esp').innerHTML='Notas: '+l.length+' ('+mb(pdfs)+'). Espaço usado pelo app: '+mb(u)+(q?' de '+mb(q):'')+'.<br>'+
+    (pers?'Dados protegidos contra limpeza automática do navegador.':'Dados sem proteção contra limpeza automática. Adicionar o app à tela inicial ajuda.')+
+    (q?'<i><b style="width:'+Math.min(100,u/q*100).toFixed(1)+'%"></b></i>':'');
+}
+$('#lim').onclick=async()=>{
+  const l=(await all()).filter(n=>n.ok);
+  if(!l.length)return toast('Nenhuma nota exportada para apagar');
+  if(!confirm('Apagar '+l.length+' nota(s) já exportada(s) deste aparelho? Confira se estão no Drive antes de continuar.'))return;
+  for(const n of l)await del(n.id);
+  render();toast(l.length+' nota(s) apagada(s)');
+};
+
+/* ---------- Lista ---------- */
+const nome=n=>String(n.nm||n.num).replace(/[^\w.-]+/g,'_')+'.pdf';
+function baixar(n){const a=document.createElement('a');a.href=URL.createObjectURL(n.blob);a.download=nome(n);document.body.appendChild(a);a.click();a.remove()}
+async function render(){
+  const l=(await all()).sort((a,b)=>b.date-a.date),pend=l.filter(n=>!n.ok).length;
+  $('#exp').textContent=pend?'Exportar tudo para o Drive ('+pend+')':'Tudo exportado';
+  $('#exp').disabled=!pend;
+  const box=$('#lista');box.innerHTML=l.length?'':'<p class="vz">Nenhuma nota salva ainda.</p>';
+  l.forEach(n=>{
+    const d=document.createElement('div');d.className='nota';
+    d.innerHTML='<b>'+esc(nome(n))+'</b>'+(n.tipo==='ped'?' (Pedido)':n.tipo==='orc'||n.tipo===undefined?' (Orçamento)':'')+(n.conf&&n.conf!=='alta'?' <span class="pe">conferir</span>':'')+'<small>'+n.pages+' pág., '+new Date(n.date).toLocaleString('pt-BR')+', <span class="'+(n.ok?'ok':'pe')+'">'+(n.ok?'Exportada':'Pendente')+'</span></small><div class="ac"><button data-a="v">Abrir</button><button data-a="b">Baixar</button><button data-a="r">Renomear</button><button data-a="x">Excluir</button></div>';
+    d.onclick=async e=>{
+      const a=e.target.dataset.a;if(!a)return;
+      if(a==='v')window.open(URL.createObjectURL(n.blob));
+      if(a==='b')baixar(n);
+      if(a==='r'){if(n.ok)return toast('Já exportada: renomeie também no Drive');const v=prompt('Novo nome do PDF (sem .pdf):',n.nm||n.num);if(v&&v.trim()){n.nm=v.trim();n.conf='alta';await put(n);render()}}
+      if(a==='x'&&confirm('Excluir esta nota?')){await del(n.id);render()}
+    };
+    box.appendChild(d);
+  });
+  $('#lim').disabled=!l.some(n=>n.ok);
+  espaco(l);
+}
+
+/* ---------- Google Drive ---------- */
+let tok=null;
+const CID=()=>localStorage.getItem('cid')||'';
+$('#cfg').onclick=()=>{
+  const v=prompt('Client ID do Google (OAuth, tipo "Aplicativo da Web"). Deixe vazio para usar só compartilhar/baixar:',CID());
+  if(v!==null){localStorage.setItem('cid',v.trim());localStorage.removeItem('fid')}
+};
+function auth(){return new Promise((res,rej)=>{
+  if(tok&&tok.exp>Date.now())return res(tok.t);
+  const go=()=>google.accounts.oauth2.initTokenClient({client_id:CID(),scope:'https://www.googleapis.com/auth/drive.file',
+    callback:r=>{if(r.error)return rej(new Error(r.error));tok={t:r.access_token,exp:Date.now()+(r.expires_in-60)*1000};res(tok.t)},
+    error_callback:e=>rej(new Error(e.type||'auth'))}).requestAccessToken();
+  if(window.google&&google.accounts)return go();
+  const s=document.createElement('script');s.src='https://accounts.google.com/gsi/client';s.onload=go;s.onerror=()=>rej(new Error('Sem conexão'));document.head.appendChild(s);
+})}
+async function pasta(t){
+  let id=localStorage.getItem('fid');if(id)return id;
+  const H={Authorization:'Bearer '+t},NM='Notas - Orçamentos';
+  const q=encodeURIComponent("name='"+NM+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+  let r=await(await fetch('https://www.googleapis.com/drive/v3/files?q='+q,{headers:H})).json();
+  id=r.files&&r.files[0]&&r.files[0].id;
+  if(!id){r=await(await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{...H,'Content-Type':'application/json'},body:JSON.stringify({name:NM,mimeType:'application/vnd.google-apps.folder'})})).json();id=r.id}
+  if(!id)throw new Error('Pasta');
+  localStorage.setItem('fid',id);return id;
+}
+async function enviar(t,f,n){
+  const fd=new FormData();
+  fd.append('metadata',new Blob([JSON.stringify({name:nome(n),parents:[f]})],{type:'application/json'}));
+  fd.append('file',n.blob);
+  const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{Authorization:'Bearer '+t},body:fd});
+  if(!r.ok){localStorage.removeItem('fid');throw new Error('Erro '+r.status)}
+}
+$('#exp').onclick=async()=>{
+  const pend=(await all()).filter(n=>!n.ok);if(!pend.length)return;
+  const duv=pend.filter(n=>n.conf&&n.conf!=='alta').length;
+  if(duv&&!confirm(duv+' nota(s) estão marcadas "conferir" (leitura incerta). Exportar mesmo assim?'))return;
+  const btn=$('#exp');btn.disabled=true;
+  try{
+    if(!CID()){
+      const files=pend.map(n=>new File([n.blob],nome(n),{type:'application/pdf'}));
+      if(navigator.canShare&&navigator.canShare({files})){
+        await navigator.share({files,title:'Notas'});
+        for(const n of pend){n.ok=true;await put(n)}
+      }else{pend.forEach(baixar);toast('PDFs baixados. Configure o Drive para enviar direto.')}
+    }else{
+      const t=await auth(),f=await pasta(t);let i=0;
+      for(const n of pend){btn.textContent='Enviando '+(++i)+' de '+pend.length+'…';await enviar(t,f,n);n.ok=true;await put(n)}
+      toast('Enviado para a pasta "Notas - Orçamentos"');
+    }
+  }catch(e){if(e.name!=='AbortError')toast('Falhou: '+(e.message||e))}
+  render();
+};
+
+updateQueue();render();proteger().then(render);
+</script>
+</body>
+</html>
