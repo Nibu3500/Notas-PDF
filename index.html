@@ -11,6 +11,16 @@
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:0 14px 156px}
 header{display:flex;justify-content:space-between;align-items:center;padding:16px 0 10px}
 h1{font-size:22px;margin:0}
+ .health{margin:0 0 12px;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:10px;font-size:13px}
+ .health-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+ .health-row+.health-row{margin-top:8px;padding-top:8px;border-top:1px solid #e1e5e9}
+ .health-state{display:inline-flex;align-items:center;gap:5px;font-weight:700;color:var(--mut)}
+ .health-state:before{content:'';width:10px;height:10px;border-radius:50%;background:currentColor;flex-shrink:0}
+ .health-state[data-level=green]{color:var(--ok)}
+ .health-state[data-level=yellow]{color:var(--pe)}
+ .health-state[data-level=red]{color:var(--rd)}
+ .health-detail{display:block;color:var(--mut);font-size:12px;margin-top:4px}
+ .health-note{display:block;color:var(--mut);font-size:11px;margin-top:8px}
 h2{font-size:16px;margin:22px 0 8px}
 .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px}
 label.t{display:block;font-size:14px;color:var(--mut);margin-bottom:4px}
@@ -108,6 +118,13 @@ body.review-open{overflow:hidden}#toast{z-index:40}
 </head>
 <body>
 <header><h1>Notas em PDF</h1><button id="cfg" aria-label="Configurar Drive">Configurar Drive</button></header>
+ <section class="health" aria-label="Situação da memória e armazenamento">
+  <div class="health-row"><strong>Memória / desempenho</strong><span class="health-state" id="ramState">Verificando…</span></div>
+  <small class="health-detail" id="ramDetail">Medindo a resposta da página…</small>
+  <div class="health-row"><strong>Armazenamento das notas</strong><span class="health-state" id="diskState">Verificando…</span></div>
+  <small class="health-detail" id="diskDetail">Consultando espaço do navegador…</small>
+  <small class="health-note">Estimativa: o navegador não informa toda a RAM do aparelho nem dos processadores OCR.</small>
+ </section>
 
 <div class="card">
   <label class="t" for="num">Número da nota (opcional, para PDF manual com várias páginas)</label>
@@ -649,14 +666,49 @@ $('#gerar').onclick=async()=>{const num=$('#num').value.trim(),l=manualJobs();if
 
 /* ---------- Espaço e proteção dos dados ---------- */
 const mb=b=>b>=1e9?(b/1e9).toFixed(1)+' GB':(b/1e6).toFixed(b<1e7?1:0)+' MB';
+/* ---------- Indicadores leves de memória e fluidez ---------- */
+function healthLevel(ratio,warning=0.65,critical=0.85){
+ return !Number.isFinite(ratio)||ratio<0?0:ratio>=critical?3:ratio>=warning?2:1;
+}
+function healthPaint(id,level,label){
+ const el=$('#'+id);el.dataset.level=['unknown','green','yellow','red'][level]||'unknown';el.textContent=label;
+}
+let healthLast=performance.now(),healthSamples=[];
+function healthMemory(){
+ const now=performance.now();
+ if(document.hidden){healthLast=now;healthSamples=[];return}
+ const lag=Math.max(0,now-healthLast-2000);healthLast=now;
+ healthSamples.push(lag);if(healthSamples.length>3)healthSamples.shift();
+ const slow=healthSamples.filter(x=>x>=250).length,verySlow=healthSamples.filter(x=>x>=1000).length;
+ const responsiveness=verySlow>=2?3:slow>=2?2:healthSamples.length>=2?1:0;
+ let used=0,limit=0;
+ try{const m=performance.memory;if(m&&Number.isFinite(m.usedJSHeapSize)&&Number.isFinite(m.jsHeapSizeLimit)&&m.jsHeapSizeLimit>0&&m.usedJSHeapSize>=0){used=m.usedJSHeapSize;limit=m.jsHeapSizeLimit}}catch(_){}
+ const heap=limit?healthLevel(used/limit):0,level=Math.max(heap,responsiveness);
+ const labels=['Verificando…','Normal (estim.)','Atenção','Sobrecarga provável'];
+ healthPaint('ramState',level,labels[level]);
+ const parts=[limit?'Memória JS: '+mb(used)+' / '+mb(limit)+' ('+Math.round(used/limit*100)+'%)':'RAM JS indisponível neste navegador', 'OCR: '+activeJobs.filter(Boolean).length+' em análise'];
+ if(responsiveness>=2)parts.push('Página respondendo lentamente');
+ if(level>=2)parts.push('Reduza as análises simultâneas se necessário');
+ $('#ramDetail').textContent=parts.join(' · ');
+}
+function healthStorage(used,quota,unavailable=false){
+ if(unavailable){healthPaint('diskState',3,'Sem armazenamento seguro');$('#diskDetail').textContent='As notas podem ser perdidas ao fechar a página.';return}
+ const known=Number.isFinite(quota)&&quota>0;
+ const level=known?healthLevel(used/quota,0.7,0.9):0;
+ healthPaint('diskState',level,['Limite indisponível','Bom','Atenção','Quase cheio'][level]);
+ $('#diskDetail').textContent=known?mb(used)+' de '+mb(quota)+' ('+(used/quota*100).toFixed(1)+'%)'+(level>=2?' · Exporte e apague apenas notas confirmadas.':''):mb(used)+' em notas; limite do navegador indisponível.';
+}
+document.addEventListener('visibilitychange',()=>{healthLast=performance.now();healthSamples=[]});
+setInterval(healthMemory,2000);
 async function proteger(){try{if(navigator.storage&&navigator.storage.persist&&!(await navigator.storage.persisted()))await navigator.storage.persist()}catch(_){}}
 async function espaco(l){
-  if(semDb){$('#esp').innerHTML='<b>Atenção:</b> o navegador não permite guardar dados quando o arquivo é aberto direto do celular (endereço content://). As notas somem ao fechar a página. Hospede o arquivo em HTTPS (ex.: GitHub Pages) para salvar de verdade.';return}
+  if(semDb){healthStorage(0,0,true);$('#esp').innerHTML='<b>Atenção:</b> o navegador não permite guardar dados quando o arquivo é aberto direto do celular (endereço content://). As notas somem ao fechar a página. Hospede o arquivo em HTTPS (ex.: GitHub Pages) para salvar de verdade.';return}
   const pdfs=l.reduce((a,n)=>a+n.blob.size,0);let u=pdfs,q=0,pers=false;
   try{
     if(navigator.storage&&navigator.storage.estimate){const e=await navigator.storage.estimate();u=e.usage||pdfs;q=e.quota||0}
     if(navigator.storage&&navigator.storage.persisted)pers=await navigator.storage.persisted();
   }catch(_){}
+  healthStorage(u,q);
   $('#esp').innerHTML='Notas: '+l.length+' ('+mb(pdfs)+'). Espaço usado pelo app: '+mb(u)+(q?' de '+mb(q):'')+'.<br>'+
     (pers?'Dados protegidos contra limpeza automática do navegador.':'Dados sem proteção contra limpeza automática. Adicionar o app à tela inicial ajuda.')+
     (q?'<i><b style="width:'+Math.min(100,u/q*100).toFixed(1)+'%"></b></i>':'');
