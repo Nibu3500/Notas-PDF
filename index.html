@@ -123,6 +123,8 @@ body.review-open{overflow:hidden}#toast{z-index:40}
   <small class="health-detail" id="ramDetail">Medindo a resposta da página…</small>
   <div class="health-row"><strong>Armazenamento das notas</strong><span class="health-state" id="diskState">Verificando…</span></div>
   <small class="health-detail" id="diskDetail">Consultando espaço do navegador…</small>
+  <div class="health-row"><strong>Proteção por quantidade de notas</strong><span class="health-state" id="batchState">0 analisadas</span></div>
+  <small class="health-detail" id="batchDetail">Limpeza a cada foto; reinício a cada 20 análises e pausa a cada 30.</small>
   <small class="health-note">Proteção automática: a memória total dos motores OCR não é visível ao navegador. Os limites são estimativas.</small>
  </section>
 
@@ -217,10 +219,12 @@ let ocrScript=null;
 function carregarBiblioteca(){if(window.Tesseract)return Promise.resolve();return ocrScript||(ocrScript=new Promise((res,rej)=>{
  const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';sc.onload=res;sc.onerror=()=>{ocrScript=null;sc.remove();rej(new Error('Sem internet para OCR'))};document.head.appendChild(sc)}))}
 const OCR_MAX=8, OCR_MODES=[1,2,3,4,5,8], OCR_SETTING='notas-ocr-concurrency-v2';
-const mobileOcr=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)||((navigator.maxTouchPoints||0)>1&&/Mac/i.test(navigator.platform||''));
-let ocrConcurrency=1,pressure=0,recovery=0;
+let ocrConcurrency=1,pressure=0,recovery=0,adaptiveCap=1,healthyTicks=0;
+let processed=0,nextRecycle=20,nextRest=30,maintenance=false,restUntil=0;
+const REST_MS=5000,RAMP_TICKS=5;
+function remainingBatch(){return Math.max(0,Math.min(nextRecycle,nextRest)-processed)}
 const retiring=Array(OCR_MAX).fill(false);
-function effectiveOcr(){return pressure===3?0:pressure===2?1:Math.min(ocrConcurrency,mobileOcr?2:OCR_MAX)}
+function effectiveOcr(){return maintenance||pressure===3?0:pressure===2?1:Math.min(ocrConcurrency,adaptiveCap,OCR_MAX)}
 try{const saved=Number(localStorage.getItem(OCR_SETTING));if(OCR_MODES.includes(saved))ocrConcurrency=saved}catch(_){}
 const workers=Array(OCR_MAX).fill(null);
 async function carregarOcr(slot){await carregarBiblioteca();if(!workers[slot])workers[slot]=await Tesseract.createWorker('eng',1,{logger:m=>{const j=activeJobs[slot];if(j&&m.status==='recognizing text')ocrProgress(j,m.progress)}});return workers[slot]}
@@ -383,7 +387,7 @@ async function runJob(j,slot){
   release(j);setJob(j,'done',100,'PDF salvo');
   }finally{clearJpeg(g)}
  }catch(e){setJob(j,'review',100,'Falha no processamento — confira ou tente novamente');if(workers[slot]){try{await workers[slot].terminate()}catch(_){}workers[slot]=null}}
- finally{activeJobs[slot]=null;pump()}
+ finally{activeJobs[slot]=null;processed++;pump()}
 }
 function retireIdleWorkers(){
  const limit=effectiveOcr(),waiting=jobs.some(j=>j.state==='waiting');
@@ -396,24 +400,34 @@ function retireIdleWorkers(){
 }
 function pump(){
  if(!queueReady)return;
- retireIdleWorkers();const cap=effectiveOcr();
+ if(!remainingBatch()&&!maintenance){maintenance=true;healthyTicks=0;adaptiveCap=1;restUntil=0;showOcrMode()}
+ retireIdleWorkers();
+ if(maintenance&&!activeJobs.some(Boolean)&&!retiring.some(Boolean)&&!workers.some(Boolean)){
+  if(processed>=nextRest){if(!restUntil){restUntil=Date.now()+REST_MS;setTimeout(pump,REST_MS+50)}if(Date.now()<restUntil){showOcrMode();updateQueue();return}}
+  while(nextRecycle<=processed)nextRecycle+=20;while(nextRest<=processed)nextRest+=30;
+  maintenance=false;restUntil=0;showOcrMode();
+ }
+ const cap=effectiveOcr();
  if(!paused&&!document.hidden&&!manualBusy&&!reviewing&&!queueWrites&&!retiring.some(Boolean)){
-  let free=cap-activeJobs.filter(Boolean).length;
+  const running=activeJobs.filter(Boolean).length;
+  let free=Math.min(cap-running,remainingBatch()-running);
   for(let slot=0;slot<cap&&free>0;slot++){
    if(!activeJobs[slot]){const j=jobs.find(x=>x.state==='waiting');if(j){free--;runJob(j,slot)}else break}
   }
  }
- if(!activeJobs.some(Boolean)&&!jobs.some(j=>j.state==='waiting'||j.state==='saving')&&!finishedAt)finishedAt=Date.now();
- updateQueue()
+ if(!activeJobs.some(Boolean)&&!jobs.some(j=>j.state==='waiting'||j.state==='saving')){if(!finishedAt)finishedAt=Date.now();adaptiveCap=1;healthyTicks=0}
+ showOcrMode();updateQueue()
 }
 function showOcrMode(){
  $('#ocrConcurrency').value=String(ocrConcurrency);
  const cap=effectiveOcr();
- $('#ocrConcurrencyHint').textContent=pressure===3?'Proteção ativa: novas análises pausadas.':pressure===2?'Proteção ativa: reduzido para 1 análise.':('Limite atual: '+cap+' análise(s). '+(mobileOcr?'No celular, máximo de 2 por segurança. ':'')+'A memória é monitorada automaticamente.');
+ $('#ocrConcurrencyHint').textContent=maintenance?'Proteção por notas: reiniciando motores / liberando memória.':pressure===3?'Proteção ativa: novas análises pausadas.':pressure===2?'Proteção ativa: reduzido para 1 análise.':('Limite atual: '+cap+' de '+ocrConcurrency+' análise(s) escolhida(s). Aumenta gradualmente se estiver estável.');
+ const level=maintenance?2:1;healthPaint('batchState',level,processed+' analisada(s)');
+ $('#batchDetail').textContent=maintenance?(restUntil?'Pausa de 5 segundos para liberar memória.':'Finalizando e reiniciando os motores OCR.'):('Limpeza a cada foto · próximo reinício: '+nextRecycle+' · próxima pausa: '+nextRest+' análises.');
 }
 $('#ocrConcurrency').onchange=()=>{
  const value=Number($('#ocrConcurrency').value);if(!OCR_MODES.includes(value)){showOcrMode();return}
- ocrConcurrency=value;try{localStorage.setItem(OCR_SETTING,String(value))}catch(_){}
+ ocrConcurrency=value;adaptiveCap=Math.min(adaptiveCap,value);healthyTicks=0;try{localStorage.setItem(OCR_SETTING,String(value))}catch(_){}
  showOcrMode();pump()
 };
 async function enfileirarFotos(fs){
@@ -714,15 +728,17 @@ function healthMemory(){
  let used=0,limit=0;
  try{const m=performance.memory;if(m&&Number.isFinite(m.usedJSHeapSize)&&Number.isFinite(m.jsHeapSizeLimit)&&m.jsHeapSizeLimit>0&&m.usedJSHeapSize>=0){used=m.usedJSHeapSize;limit=m.jsHeapSizeLimit}}catch(_){}
  const heap=limit?(used>=150e6?3:used>=100e6?2:1):0,level=Math.max(heap,responsiveness);
- const previous=pressure;
- if(level>=2){recovery=0;pressure=Math.max(pressure,level)}else if(++recovery>=3){pressure=0;recovery=0}
- if(previous!==pressure){showOcrMode();pump()}
+ const previous=pressure,previousCap=adaptiveCap;
+ if(level>=2){recovery=0;healthyTicks=0;adaptiveCap=1;pressure=Math.max(pressure,level)}else if(level===1){if(++recovery>=3){pressure=0;recovery=0}
+  if(!pressure&&!maintenance&&!paused&&!manualBusy&&!reviewing&&activeJobs.some(Boolean)&&jobs.some(j=>j.state==='waiting')&&adaptiveCap<ocrConcurrency){if(++healthyTicks>=RAMP_TICKS){adaptiveCap++;healthyTicks=0}}else healthyTicks=0;
+ }else healthyTicks=0;
+ if(previous!==pressure||previousCap!==adaptiveCap){showOcrMode();pump()}
  const displayLevel=Math.max(level,pressure);
  const labels=['Verificando…','Normal (estim.)','Atenção','Sobrecarga provável'];
  healthPaint('ramState',displayLevel,labels[displayLevel]);
  const parts=[limit?'Memória JS: '+mb(used)+' / '+mb(limit)+' ('+Math.round(used/limit*100)+'%)':'RAM JS indisponível neste navegador', 'OCR: '+activeJobs.filter(Boolean).length+' em análise / '+effectiveOcr()+' permitida(s)'];
  if(responsiveness>=2)parts.push('Página respondendo lentamente');
- if(pressure===3)parts.push('Novas análises pausadas automaticamente');else if(pressure===2)parts.push('Reduzido para 1 análise');if(queueStorageFailed)parts.push('Atenção: não foi possível garantir a recuperação de todas as fotos');
+ if(pressure===3)parts.push('Novas análises pausadas automaticamente');else if(pressure===2)parts.push('Reduzido para 1 análise');if(maintenance)parts.push('Manutenção por quantidade de notas');if(queueStorageFailed)parts.push('Atenção: não foi possível garantir a recuperação de todas as fotos');
  $('#ramDetail').textContent=parts.join(' · ');
 }
 function healthStorage(used,quota,unavailable=false){
@@ -732,7 +748,7 @@ function healthStorage(used,quota,unavailable=false){
  healthPaint('diskState',level,['Limite indisponível','Bom','Atenção','Quase cheio'][level]);
  $('#diskDetail').textContent=known?mb(used)+' de '+mb(quota)+' ('+(used/quota*100).toFixed(1)+'%)'+(level>=2?' · Exporte e apague apenas notas confirmadas.':''):mb(used)+' em notas; limite do navegador indisponível.';
 }
-document.addEventListener('visibilitychange',()=>{healthLast=performance.now();healthSamples=[];pump()});
+document.addEventListener('visibilitychange',()=>{healthLast=performance.now();healthSamples=[];healthyTicks=0;pump()});
 setInterval(healthMemory,2000);
 async function proteger(){try{if(navigator.storage&&navigator.storage.persist&&!(await navigator.storage.persisted()))await navigator.storage.persist()}catch(_){}}
 async function espaco(l){
