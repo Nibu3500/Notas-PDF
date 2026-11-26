@@ -439,7 +439,7 @@ $('#retryAll').onclick=()=>{for(const j of pendingReview())retry(j);paused=false
 $('#pauseQueue').onclick=()=>{paused=!paused;pump()};
 $('#clearDone').onclick=()=>{for(let i=jobs.length-1;i>=0;i--)if(jobs[i].state==='done'){release(jobs[i]);jobs.splice(i,1)}if(!jobs.length){started=0;finishedAt=0}updateQueue()};
 setInterval(()=>{if(activeJobs.some(Boolean))scheduleQueue()},1000);
-window.addEventListener('beforeunload',e=>{if(jobs.some(j=>j.state!=='done')||camShots.length){e.preventDefault();e.returnValue=''}});
+window.addEventListener('beforeunload',e=>{if(queueWrites||jobs.some(j=>j.state!=='done')||camShots.length){e.preventDefault();e.returnValue=''}});
 /* ---------- Prévia e correção manual ---------- */
 let reviewing=null,zoom=1,reviewAngle=0,reviewBusy=false,previewToken=0,previewUrl=null;
 const reviewable=()=>jobs.filter(j=>j.state==='review'||j.state==='manual');
