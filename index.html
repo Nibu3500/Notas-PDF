@@ -123,7 +123,7 @@ body.review-open{overflow:hidden}#toast{z-index:40}
   <div class="row"><label class="btn" for="arq">Da pasta de arquivos (muitas fotos)</label></div>
   <div id="thumbs"></div>
   <div class="row"><button class="pri" id="gerar" disabled>Gerar PDF manual</button></div>
-  <div class="ocr-settings"><label for="ocrConcurrency">Desempenho da leitura automática</label><select id="ocrConcurrency" aria-describedby="ocrConcurrencyHint"><option value="2">Econômico — 2 análises (padrão)</option><option value="3">Equilibrado — 3 análises</option><option value="4">Desempenho — 4 análises</option><option value="5">Rápido — 5 análises</option><option value="8">Turbo — 8 análises (experimental)</option></select><small id="ocrConcurrencyHint" aria-live="polite"></small></div>
+  <div class="ocr-settings"><label for="ocrConcurrency">Desempenho da leitura automática</label><select id="ocrConcurrency" aria-describedby="ocrConcurrencyHint"><option value="2">Econômico — 2 análises (padrão)</option><option value="3">Equilibrado — 3 análises</option><option value="4">Desempenho — 4 análises</option><option value="5">Rápido — 5 análises</option><option value="8">Turbo — 8 análises (experimental)</option></select><small id="ocrConcurrencyHint" aria-live="polite"></small><div class="row"><button type="button" class="pri" id="camBelowPerformance">Tirar foto</button></div></div>
 </div>
 
 <section class="card" id="queuePanel" hidden>
@@ -643,6 +643,7 @@ $('#camCancel').onclick=()=>{if(!camShots.length||confirm('Descartar as '+camSho
 $('#camNative').onclick=()=>{if(camShots.length)return $('#camStatus').textContent='Finalize as fotos capturadas antes de usar a outra câmera.';fecharCamera();$('#cam').click()};
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!camModal.hidden)$('#camCancel').click()});
 window.addEventListener('pagehide',()=>{if(!camModal.hidden)fecharCamera()});
+$('#camBelowPerformance').onclick=()=>$('#cam').click();
 $('#cam').onchange=addFotos;$('#gal').onchange=addFotos;$('#arq').onchange=addFotos;
 $('#gerar').onclick=async()=>{const num=$('#num').value.trim(),l=manualJobs();if(!/^\d{1,20}$/.test(num))return toast('Digite o número da nota (somente dígitos)');if(!l.length)return toast('Selecione as fotos com o número preenchido');const gs=[];l.forEach(j=>{j.state='saving';j.msg='Gerando PDF manual';j.p=95});updateQueue();try{for(const j of l)gs.push(await proc(j.file));const nm=await salvar(num,'',gs,'alta');for(const j of l){j.nm=nm;release(j);setJob(j,'done',100,'Página do PDF manual salvo')}$('#num').value='';toast('Salvo: '+nm+'.pdf')}catch(_){l.forEach(j=>setJob(j,'manual',0,'Falha ao salvar — tente novamente'));toast('Falha ao salvar; fotos mantidas')}finally{gs.forEach(g=>URL.revokeObjectURL(g.url));pump()}};
 
