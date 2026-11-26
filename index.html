@@ -40,6 +40,10 @@ button:disabled{opacity:.5;cursor:default}
 #esp i b{display:block;height:100%;background:var(--ac)}
 #ocr{font-size:14px;margin-top:6px;min-height:1.4em}
 #ocr button{padding:2px 8px;font-size:13px}
+.ocr-settings{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.ocr-settings label{display:block;font-size:14px;font-weight:600;margin-bottom:5px}
+.ocr-settings select{width:100%;font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px}
+.ocr-settings small{display:block;margin-top:5px;color:var(--mut);font-size:12px}
 #bar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom,0px));background:var(--ink)}
 #bar button{width:100%;background:#fff}
 #bar{z-index:10}#expInfo{color:#fff;text-align:center;font-size:13px;margin-bottom:6px}#expRetry{margin-top:6px;font-size:13px;padding:6px}#expRetry[hidden]{display:none}
@@ -119,6 +123,7 @@ body.review-open{overflow:hidden}#toast{z-index:40}
   <div class="row"><label class="btn" for="arq">Da pasta de arquivos (muitas fotos)</label></div>
   <div id="thumbs"></div>
   <div class="row"><button class="pri" id="gerar" disabled>Gerar PDF manual</button></div>
+  <div class="ocr-settings"><label for="ocrConcurrency">Desempenho da leitura automática</label><select id="ocrConcurrency" aria-describedby="ocrConcurrencyHint"><option value="2">Econômico — 2 análises (padrão)</option><option value="3">Equilibrado — 3 análises</option><option value="4">Desempenho — 4 análises</option><option value="5">Rápido — 5 análises</option><option value="8">Turbo — 8 análises (experimental)</option></select><small id="ocrConcurrencyHint" aria-live="polite"></small></div>
 </div>
 
 <section class="card" id="queuePanel" hidden>
@@ -190,7 +195,10 @@ async function proc(file){const g=await tojpg(await abrir(file,1800));g.file=fil
 let ocrScript=null;
 function carregarBiblioteca(){if(window.Tesseract)return Promise.resolve();return ocrScript||(ocrScript=new Promise((res,rej)=>{
  const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';sc.onload=res;sc.onerror=()=>{ocrScript=null;sc.remove();rej(new Error('Sem internet para OCR'))};document.head.appendChild(sc)}))}
-const workers=[null,null];
+const OCR_MAX=8, OCR_MODES=[2,3,4,5,8], OCR_SETTING='notas-ocr-concurrency';
+let ocrConcurrency=2;
+try{const saved=Number(localStorage.getItem(OCR_SETTING));if(OCR_MODES.includes(saved))ocrConcurrency=saved}catch(_){}
+const workers=Array(OCR_MAX).fill(null);
 async function carregarOcr(slot){await carregarBiblioteca();if(!workers[slot])workers[slot]=await Tesseract.createWorker('eng',1,{logger:m=>{const j=activeJobs[slot];if(j&&m.status==='recognizing text')ocrProgress(j,m.progress)}});return workers[slot]}
 function girar(c,d){if(!d)return c;const o=document.createElement('canvas'),q=d%180!==0;
   o.width=q?c.height:c.width;o.height=q?c.width:c.height;
@@ -309,7 +317,7 @@ function pdf(num,imgs,tipo){
   return new Blob(P,{type:'application/pdf'});
 }
 
-/* ---------- Fila: dois workers independentes ---------- */
+/* ---------- Fila: workers independentes com limite configurável ---------- */
 let rt;const agendar=()=>{clearTimeout(rt);rt=setTimeout(render,500)};
 let saveChain=Promise.resolve();
 function salvar(num,tipo,gs,conf){
@@ -317,7 +325,7 @@ function salvar(num,tipo,gs,conf){
  await put({num,nm,tipo,conf,date:Date.now(),pages:gs.length,blob:pdf(num,gs,tipo),ok:false});proteger();agendar();return nm});
  saveChain=task.catch(()=>{});return task;
 }
-const jobs=[],activeJobs=[null,null];let seq=0,paused=false,started=0,finishedAt=0,queueTimer=0;
+const jobs=[],activeJobs=Array(OCR_MAX).fill(null);let seq=0,paused=false,started=0,finishedAt=0,queueTimer=0;
 const pendingReview=()=>jobs.filter(j=>j.state==='review');
 const manualJobs=()=>jobs.filter(j=>j.state==='manual');
 function release(j){if(j.url)URL.revokeObjectURL(j.url);j.url=null;j.file=null;if(j.el){j.el.remove();j.el=null}}
@@ -351,7 +359,32 @@ async function runJob(j,slot){
  }catch(e){setJob(j,'review',100,'Falha no processamento — confira ou tente novamente');if(workers[slot]){try{await workers[slot].terminate()}catch(_){}workers[slot]=null}}
  finally{activeJobs[slot]=null;pump()}
 }
-function pump(){if(!paused)for(let slot=0;slot<2;slot++){if(!activeJobs[slot]){const j=jobs.find(x=>x.state==='waiting');if(j)runJob(j,slot)}}if(!activeJobs.some(Boolean)&&!jobs.some(j=>j.state==='waiting'||j.state==='saving'))finishedAt=Date.now();updateQueue()}
+function retireIdleWorkers(){
+ for(let slot=ocrConcurrency;slot<OCR_MAX;slot++){
+  if(!activeJobs[slot]&&workers[slot]){const w=workers[slot];workers[slot]=null;try{Promise.resolve(w.terminate()).catch(()=>{})}catch(_){}}
+ }
+}
+function pump(){
+ retireIdleWorkers();
+ if(!paused){
+  let free=ocrConcurrency-activeJobs.filter(Boolean).length;
+  for(let slot=0;slot<ocrConcurrency&&free>0;slot++){
+   if(!activeJobs[slot]){const j=jobs.find(x=>x.state==='waiting');if(j){free--;runJob(j,slot)}else break}
+  }
+ }
+ if(!activeJobs.some(Boolean)&&!jobs.some(j=>j.state==='waiting'||j.state==='saving'))finishedAt=Date.now();
+ updateQueue()
+}
+function showOcrMode(){
+ $('#ocrConcurrency').value=String(ocrConcurrency);
+ $('#ocrConcurrencyHint').textContent=ocrConcurrency>=8?'Experimental: pode aquecer ou travar o aparelho. Reduza se ficar lento.':ocrConcurrency>=5?'Maior uso de memória e bateria. Reduza se o aparelho ficar lento.':'A preferência é salva neste aparelho. As análises em andamento não são canceladas.';
+}
+$('#ocrConcurrency').onchange=()=>{
+ const value=Number($('#ocrConcurrency').value);if(!OCR_MODES.includes(value)){showOcrMode();return}
+ ocrConcurrency=value;try{localStorage.setItem(OCR_SETTING,String(value))}catch(_){}
+ showOcrMode();pump()
+};
+showOcrMode();
 function enfileirarFotos(fs){if(!fs.length)return;if(!jobs.length){started=Date.now();finishedAt=0}if(finishedAt){started=Date.now();finishedAt=0}const manual=!!$('#num').value.trim();for(const file of fs)jobs.push({id:++seq,file,url:URL.createObjectURL(file),state:manual?'manual':'waiting',p:0,msg:manual?'PDF manual':'Aguardando processamento',steps:0});pump()}
 function addFotos(e){const fs=[...e.target.files];e.target.value='';enfileirarFotos(fs)}
 function retry(j){if(j.state!=='review')return;j.suggest='';j.angle=0;j.p=0;j.msg='Aguardando nova leitura';j.state='waiting';finishedAt=0}
